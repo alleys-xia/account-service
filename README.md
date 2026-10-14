@@ -20,37 +20,6 @@ account-service/
 
 这些 `packages/` 都属于本仓库，用固定版本 wheel 提供给策略和 Execution，**不另建共享包仓库**。策略无需安装账户服务、IB 或 PostgreSQL 驱动。
 
-## 安装与启动
-
-需要 Python 3.11、uv、PostgreSQL 和 NATS JetStream。与 `market-data-gateway`、`execution`、`strategies` 平级放置：
-
-```bash
-cd account-service
-python3 scripts/bootstrap.py
-python3 scripts/init_local.py
-# 已有 .env 不会被覆盖；按 .env.example 补齐缺少的密码。
-set -a
-source .env
-set +a
-```
-
-安装后以 `python3 scripts/bootstrap.py --locked` 验证锁文件。先准备各模块数据库和 NATS，再启动账户进程。IB 模拟环境示例：
-
-```bash
-# 仅首次执行；有同名数据库时不要重建。
-createdb oms_ib_paper
-createdb risk_ib_paper
-createdb portfolio_paper
-
-# 独立终端启动；从 account-service/ 执行并加载相同 .env。
-../market-data-gateway/data/tools/nats-server-v2.15.1-darwin-arm64/nats-server -c config/nats.paper.conf
-
-# 一个终端即启动三个模块。
-.venv/bin/account-runtime --oms config/oms.paper.toml --risk config/risk.paper.toml --portfolio config/portfolio.paper.toml
-```
-
-再启动独立 [Execution](../execution/README.md)。两侧 NATS 密码必须一致。策略与 OMS、Portfolio 的账户别名／执行模式也必须一致。SIMULATION 使用默认三份 `*.example.toml`，对应 `oms_dev`、`risk_dev`、`portfolio_dev`；没有券商快照提供者时 Portfolio 如实显示来源不可用。
-
 ## Portfolio 首期能力
 
 - 从 OMS 持久账户事件按序回放，每个策略、每个合约独立记账；重复事件幂等，冲突或序列缺口冻结。
@@ -62,4 +31,6 @@ createdb portfolio_paper
 
 同进程提供模块与数据所有权边界，共享内存和故障范围；任一核心模块不可恢复故障会使整个账户进程退出。保留 `oms`、`risk`、`portfolio` 单模块入口用于排障，同一数据库不要与统一入口同时启动。
 
-[当前架构](docs/portfolio-design.md) · [运行与迁移](docs/operations.md) · [本轮验收](docs/portfolio-acceptance.md) · [订单接口](docs/interfaces.md) · [Risk 规则设计](docs/risk/design.md)
+[当前架构](docs/portfolio-design.md) · [模块边界与状态](docs/operations.md) · [本轮验收](docs/portfolio-acceptance.md) · [订单接口](docs/interfaces.md) · [Risk 规则设计](docs/risk/design.md)
+
+本版不实现统一监控、期权到期／指派处理、行情回放。下一步优先完善现有账户模块的平仓校验、可平数量预占和持仓风险额度转换，不新增独立服务。

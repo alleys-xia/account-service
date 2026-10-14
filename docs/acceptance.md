@@ -1,4 +1,4 @@
-> 本文保留 OMS 模块历史设计／验收。当前 OMS、Risk、Portfolio 已同仓库同进程，运行以 [账户手册](operations.md) 为准，Portfolio 新增能力见 [当前设计](portfolio-design.md)。
+> 本文保留 OMS 模块历史设计／验收。当前 OMS、Risk、Portfolio 已同仓库同进程，运行以 [账户状态说明](operations.md) 为准，Portfolio 新增能力见 [当前设计](portfolio-design.md)。
 
 # OMS v0.1 验证记录
 

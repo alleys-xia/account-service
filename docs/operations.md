@@ -1,26 +1,6 @@
-# 账户进程运行与迁移
+# 账户模块边界与状态
 
-## 仓库迁移
-
-原 `oms/` 重命名为 `account-service/`，保留其 Git 历史；Risk 源码移入 `src/risk_service/`。原 Risk 完整工作目录和迁移前 Git bundle 保存在父目录 `.migration-backups/2026-10-14-account-service/`，属于本机恢复备份，不上传。Portfolio 直接加入同仓库，不再单建 repo。
-
-原 OMS/Risk 数据库没有搬迁或删除，原私有 `.env` 没有覆盖。风险配置和数据库仍须选择同一账户、环境、模式；不能把 `SIMULATION` 数据作为 `IB_PAPER` 使用。原工作目录中的启动路径、旧 venv 脚本须切换到新目录并重新 bootstrap。Execution、Strategies 的安装脚本已改为从 `account-service/packages/` 构建依赖。
-
-共享协议 Python 导入名保持 `oms_protocol`、`oms_client`；消费者不需要导入服务代码。Portfolio 增加 `portfolio_client`，仍属于账户仓库。这里没有新建共享 Git 仓库。
-
-已有 IB_PAPER NATS 数据目录可能位于旧 `execution/data/nats-paper/`。升级时先停止原进程，为新的 NATS 配置创建私有 `config/local.nats.conf` 并将 `store_dir` 指向原目录的绝对路径（或离线完整迁移后保持同一数据），不要带着原业务数据库启动一个空的 JetStream。原 `default / SIMULATION` 与 `paperib / IB_PAPER` 也不得混用存储。
-
-## 配置与顺序
-
-首次照 README 安装并创建模块独立数据库。统一入口检查账户／环境／执行模式、NATS 地址、策略名单、Risk/Portfolio 合约版本与乘数一致；每个 Store 再校验数据库身份和单写锁。生产化时给三个数据库配置不同 PostgreSQL 角色；本机使用同一个管理员角色不构成访问隔离。
-
-启动顺序：PostgreSQL → NATS → account-runtime → Execution → 策略。Portfolio 在 Execution 尚未上线时返回来源不可用；Risk 的 IB_PAPER 示例因此拒绝新风险，待新鲜对账匹配后恢复审批资格。不会因为账户进程已启动就宣布可以交易。
-
-- `config/nats.paper.conf` 是 IB_PAPER ACL 的唯一维护源，账户别名 `paperib`，默认端口 4223。
-- `config/nats.dev.conf` 是共用网关的 SIMULATION 模板，使用网关的 `MD_*` 凭据，账户别名 `default`。加载网关和本仓库私有 `.env`；开发模式不内置模拟执行器或虚构券商快照。
-- `portfolio.*.toml` 的 `catalog_file` 读取同一份 Risk 合约目录；Execution 仍独立核验 instrument_id、版本、conId、乘数和合约资格。
-- 三模块数据库 DSN 可由 `OMS_DATABASE_URL`、`RISK_DATABASE_URL`、`PORTFOLIO_DATABASE_URL` 覆盖。切换配置前检查终端中旧环境变量，环境变量优先于 TOML。
-- 新策略同步登记 OMS/Portfolio 策略名单、Risk 限额、NATS 账户服务 ACL；行情服务还需自身 ACL。策略只获自己的 Portfolio subject 权限。
+OMS、Risk、Portfolio 同仓库同进程，独立持有数据库、事务与消息身份。账户、模式、NATS 地址、策略集合及合约版本必须一致；配置文件和自动化脚本继续保留，后续由助手负责目标服务器部署。
 
 ## 快照与故障
 

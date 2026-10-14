@@ -55,6 +55,7 @@ class Service:
         result = dict(
             accepted=False,
             code=code,
+            retryable=code == "OMS_BUSY",
             command_id=command.command_id,
             business_hash=command.business_hash(),
         )
@@ -191,6 +192,14 @@ class Service:
                     raise ProtocolError("COMMAND_EXPIRED")
                 if command.operation != "cancel" and await self.store.meta("blocked"):
                     raise ProtocolError("ACCOUNT_RECONCILIATION_REQUIRED")
+                if command.operation != "cancel":
+                    pending = await self.store.one(
+                        "SELECT count(*) AS n FROM oms.outbox WHERE NOT published"
+                    )
+                    if pending["n"] >= self.settings.max_outbox:
+                        # Persist a final admission result and ACK; do not leave risk-increasing
+                        # commands occupying the shared consumer and starving cancellation.
+                        raise ProtocolError("OMS_BUSY")
                 if command.operation == "submit":
                     previous = await self.store.one(
                         "SELECT id FROM oms.orders WHERE strategy=%s AND client_order_id=%s",

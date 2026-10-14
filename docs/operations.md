@@ -6,9 +6,9 @@ OMS 使用 PostgreSQL 会话级 advisory lock 保证一个数据库只有一个�
 
 PostgreSQL 的 inbox、订单聚合、journal、outbox 在一个事务中更新。消息只有在提交后才确认。outbox 收到 JetStream PubAck 后才标记 published；失去确认时沿用原消息 ID 重发。服务故障之后可重启同一配置，禁止通过清空库或换 feed_epoch 来“恢复”。
 
-NATS 使用文件持久化、LimitsPolicy、DiscardNew、无自动过期，默认容量 128 MiB。达到上限时拒绝新写入，OMS outbox 保留未完成发送并重试；新单／改单会在 outbox 压力达到阈值后延迟处理，仍允许处理撤单和回报。该取舍避免自动丢弃未处理订单，但需要监控容量；**当前未提供在线归档／安全截断工具**。提高容量前先停止 OMS、用管理身份扩容 stream 并同步配置，然后重启。不能删除 stream、consumer 或 PostgreSQL 历史来释放空间。
+NATS 使用文件持久化、LimitsPolicy、DiscardNew、无自动过期，默认容量 128 MiB。达到上限时拒绝新写入，OMS outbox 保留未完成发送并重试；outbox 达阈值后，新单／改单持久化为 `OMS_BUSY` 拒绝并确认输入消息，仍继续处理撤单和回报；阈值是准入压力线，拒绝回报仍可能使 outbox 增长。该取舍避免自动丢弃未处理订单，但需要监控容量；**当前未提供在线归档／安全截断工具**。提高容量前先停止 OMS、用管理身份扩容 stream 并同步配置，然后重启。不能删除 stream、consumer 或 PostgreSQL 历史来释放空间。
 
-现有 stream / consumer 的关键配置不匹配时拒绝启动，不静默改写。单节点开发配置不提供主机故障级高可用；Linux Docker 阶段需要持久卷、备份、资源和进程重启策略。
+OMS 的三个可靠入口 consumer 采用 `max_ack_pending=1`，防止接收后提交前崩溃使后续费用／更正先于原成交处理；策略 consumer 保持独立，允许 32 个未确认消息。现有 stream / consumer 的关键配置不匹配时拒绝启动，不静默改写。早期开发实例如果仍使用旧的 32 槽 OMS 入口，先停止服务并用管理身份修改 consumer 配置，保留 consumer 的确认位置，不删除重建。单节点开发配置不提供主机故障级高可用；Linux Docker 阶段需要持久卷、备份、资源和进程重启策略。
 
 ## 会话与健康
 

@@ -11,7 +11,7 @@ oms = "oms_service.app:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/oms_service"]
 [dependency-groups]
-dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1"]
+dev = ["ruff>=0.12,<1"]
 [tool.uv.sources]
 oms-protocol = { path = ".cache/wheels/oms_protocol-0.1.0-py3-none-any.whl" }
 oms-client = { path = ".cache/wheels/oms_client-0.1.0-py3-none-any.whl" }

@@ -67,11 +67,11 @@ oms/
 - 账户 journal／策略流：evt.oms.{account}.journal、evt.oms.{account}.strategy.{strategy}。
 - 会话和只读查询：rpc.oms.{account}.{strategy}（operation 在请求体）。
 
-所有上述主题包含环境与 v1 前缀。命令和事件使用 JetStream File + LimitsPolicy + DiscardNew，不用 WorkQueue；数据库长期去重，不依赖消息去重窗口。流不自动过期，容量满拒绝写入，积压导致延迟新受理并暴露健康指标，不静默删可靠事件。共享广播使用独立持久消费者。
+所有上述主题包含环境与 v1 前缀。命令和事件使用 JetStream File + LimitsPolicy + DiscardNew，不用 WorkQueue；数据库长期去重，不依赖消息去重窗口。流不自动过期，容量满拒绝写入，积压导致新单／改单被明确拒绝为 OMS_BUSY，并暴露健康指标，不静默删可靠事件。共享广播使用独立持久消费者。
 
 每个命令／回报在单个数据库事务中写入 inbox、订单状态、journal、outbox，提交后才 ack。outbox 等到 PubAck 后标为已发布；重复出站保持 message_id。不承诺跨 PostgreSQL、NATS、券商的 exactly-once。
 
-一个数据库有一个活动 OMS，通过 session advisory lock 保持单写者；同一连接的操作串行，事务与查询受超时限制。失去数据库连接则停止进程，不在丢锁后继续发布。account_seq 和 strategy_seq 在事务中生成，feed_epoch 持久保存，重启不重置。
+一个数据库有一个活动 OMS，通过 session advisory lock 保持单写者；同一连接的操作串行，事务与查询受超时限制。检测到数据库连接失效则停止进程；数据库与总线不能原子 fencing，故在途发布仍须依靠稳定 ID 和未来执行器的持久去重／fencing 收敛。account_seq 和 strategy_seq 在事务中生成，feed_epoch 持久保存，重启不重置。
 
 ## 幂等、权限与会话
 

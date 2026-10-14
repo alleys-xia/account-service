@@ -53,7 +53,7 @@ class Transport:
             ack_policy=AckPolicy.EXPLICIT,
             ack_wait=30,
             max_deliver=-1,
-            max_ack_pending=32,
+            max_ack_pending=32 if name.startswith("strategy_") else 1,
             max_waiting=8,
         )
         try:
@@ -193,14 +193,6 @@ class Transport:
                     await message.ack_sync()
                     continue
                 if channel == "oms_commands":
-                    if value.operation != "cancel":
-                        async with self.store.transaction():
-                            count = await self.store.one(
-                                "SELECT count(*) AS n FROM oms.outbox WHERE NOT published"
-                            )
-                        if count["n"] >= self.settings.max_outbox:
-                            await message.nak(delay=1)
-                            continue
                     await handler(value, message.subject.rsplit(".", 1)[1])
                 else:
                     await handler(value)

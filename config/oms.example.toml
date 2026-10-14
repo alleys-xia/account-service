@@ -1,0 +1,13 @@
+# Secrets are supplied via environment variables, never committed.
+environment = "paper"
+account_id = "default"
+mode = "SIMULATION"
+nats_url = "nats://127.0.0.1:4222"
+nats_user = "oms"
+strategies = ["alpha", "beta"]
+session_ttl = 30
+max_outbox = 10000
+stream_max_bytes = 134217728
+rpc_timeout = 5
+# OMS_DATABASE_URL=postgresql://localhost/oms_dev
+# OMS_NATS_PASSWORD=<private password>

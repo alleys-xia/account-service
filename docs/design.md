@@ -2,13 +2,40 @@
 
 日期：2026-10-14。适用个人单账户、多策略独立进程；Python 3.11、NATS JetStream、PostgreSQL 16，本机优先。OMS 是第三个独立业务仓库；协议和客户端置于其 packages/，不新增公共库仓库。
 
+## 架构图
+
+```mermaid
+flowchart LR
+  ST["策略进程 × N<br/>模板回调 + 本地 SQLite"]
+  SDK["oms-client<br/>会话 / 命令 / 回报确认 / 恢复"]
+  BUS["NATS JetStream<br/>账户与策略隔离"]
+  OMS["OMS 独立进程<br/>受理 / 状态机 / 幂等 / 路由"]
+  DB[("PostgreSQL<br/>订单 + inbox + journal + outbox")]
+  RISK["Risk 独立进程<br/>后续实现"]
+  EXEC["Execution 独立进程<br/>后续实现"]
+  IB["ib_async / IB Gateway<br/>后续实盘链路"]
+  MD["行情网关独立进程<br/>Futu OpenD"]
+  MD -->|"行情 SDK：订阅 / 查询"| ST
+  ST <--> SDK
+  SDK <-->|"命令与专属回报 / RPC"| BUS
+  BUS <-->|"提交事务后确认"| OMS
+  OMS <--> DB
+  BUS -.->|"完整组合意图 / 风控水位"| RISK
+  RISK -.->|"批准范围 / 预占 / 期限"| BUS
+  BUS -.->|"稳定 ID 的执行指令"| EXEC
+  EXEC -.->|"逐腿成交 / 状态 / 费用"| BUS
+  EXEC -.-> IB
+```
+
+实线为本轮实现；虚线为后续模块边界。本次验收使用临时独立模拟进程替代 Risk / Execution。
+
 ## 目标与边界
 
 OMS 负责订单受理、数据库幂等、状态机、风险请求、执行命令、订单／逐腿成交 journal、策略归属及恢复快照。Risk 决定风险政策和预占，Execution 连接券商并核对真实订单，Portfolio 核算账户资产。OMS 不直接连接 IB，不实现资金风控规则，不把订单记录声称为持仓账本。
 
 本轮仅启用 paper + SIMULATION 执行域。独立模拟 Risk／Execution 仅用于临时验收，不随交付保留，不能被当作已实现的真实模块。无真实下单，trade_ready=false。真实 Risk／Execution 尚未部署时，受理订单可以停留 RISK_PENDING，绝不自动批准。
 
-首期接受 LIMIT 整股股票、单腿期权、开仓 bear call/bull put 两腿等比例价差；同一个组合 order_id 始终携带全部 legs。修改只允许净限价变化，其余合约、方向、数量、期限不变，重新风控且原单保持工作，待执行确认后生效；更广的改单通过未来明确能力扩展。撤单请求失败不等于原订单拒绝。组合摘要只表进度，实际成交必须逐腿记录；不产生双重账本。
+首期接受 LIMIT 整股股票、单腿期权、开仓 bear call/bull put 两腿等比例价差；同一个组合 order_id 始终携带全部 legs。修改只允许净限价变化，其余合约、方向、数量、TIF 不变，决策期限可更新，重新风控且原单保持工作，待执行确认后生效；更广的改单通过未来明确能力扩展。撤单请求失败不等于原订单拒绝。组合摘要只表进度，实际成交必须逐腿记录；不产生双重账本。
 
 ## 目录与状态所有权
 
@@ -24,7 +51,7 @@ oms/
 ├── packages/oms-protocol/ 公共订单模型和消息
 ├── packages/oms-client/   策略端命令发送、可靠回报、恢复查询
 ├── config/               无秘密配置与 NATS ACL
-├── scripts/              安装、初始化和协议导出
+├── scripts/              安装和初始化
 └── docs/                 设计、运行与验收记录
 ```
 
@@ -38,9 +65,9 @@ oms/
 - 风险请求／决定：cmd.risk.{account}.check、evt.risk.{account}.decision。
 - 执行请求／回报：cmd.exec.{account}.order、evt.exec.{account}.broker。
 - 账户 journal／策略流：evt.oms.{account}.journal、evt.oms.{account}.strategy.{strategy}。
-- 会话和只读查询：rpc.oms.{account}.{strategy}.{operation}。
+- 会话和只读查询：rpc.oms.{account}.{strategy}（operation 在请求体）。
 
-所有上述主题包含环境与 v1 前缀。命令和事件使用 JetStream File + LimitsPolicy + DiscardNew，不用 WorkQueue；数据库长期去重，不依赖消息去重窗口。流不自动过期，容量满拒绝写入，积压导致关闭新受理并报警，不静默删可靠事件。共享广播使用独立持久消费者。
+所有上述主题包含环境与 v1 前缀。命令和事件使用 JetStream File + LimitsPolicy + DiscardNew，不用 WorkQueue；数据库长期去重，不依赖消息去重窗口。流不自动过期，容量满拒绝写入，积压导致延迟新受理并暴露健康指标，不静默删可靠事件。共享广播使用独立持久消费者。
 
 每个命令／回报在单个数据库事务中写入 inbox、订单状态、journal、outbox，提交后才 ack。outbox 等到 PubAck 后标为已发布；重复出站保持 message_id。不承诺跨 PostgreSQL、NATS、券商的 exactly-once。
 
@@ -54,7 +81,7 @@ command_id 在账户内长期唯一，相同内容重投返回原结果，内容
 
 ## 状态与风险批准
 
-独立记录 lifecycle、dispatch_certainty、cancel_state、consistency，以及订单视图 revision 与 intent_revision。RECEIVED/RISK_PENDING/SUBMITTED/PARTIALLY_FILLED/FILLED/CANCELLED/REJECTED 与请求失败分开。
+独立记录 lifecycle、dispatch_certainty、cancel_state、consistency，以及订单视图 revision 与 intent_revision。RISK_PENDING/DISPATCH_PENDING/SUBMITTED/PARTIALLY_FILLED/FILLED/CANCELLED/REJECTED 与请求失败分开。
 
 RiskDecision 必须关联 risk_request_id、order_id、intent_revision、intent_hash、required_account_seq、reservation_id、批准边界和有效期。OMS 只对完全匹配且尚有效的批准生成一次执行命令；重复决定不重复下发。批准到执行之间由 Execution 再校验有效期；未发单、未知和已取消必须作为明确事实回报，预占释放由 Risk 消费 journal 决定，OMS 不自行修改额度。
 

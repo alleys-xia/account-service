@@ -1,0 +1,20 @@
+flowchart LR
+  ST["策略进程 × N<br/>模板回调 + 本地 SQLite"]
+  SDK["oms-client<br/>会话 / 命令 / 回报确认 / 恢复"]
+  BUS["NATS JetStream<br/>账户与策略隔离"]
+  OMS["OMS 独立进程<br/>受理 / 状态机 / 幂等 / 路由"]
+  DB[("PostgreSQL<br/>订单 + inbox + journal + outbox")]
+  RISK["Risk 独立进程<br/>后续实现"]
+  EXEC["Execution 独立进程<br/>后续实现"]
+  IB["ib_async / IB Gateway<br/>后续实盘链路"]
+  MD["行情网关独立进程<br/>Futu OpenD"]
+  MD -->|"行情 SDK：订阅 / 查询"| ST
+  ST <--> SDK
+  SDK <-->|"命令与专属回报 / RPC"| BUS
+  BUS <-->|"提交事务后确认"| OMS
+  OMS <--> DB
+  BUS -.->|"完整组合意图 / 风控水位"| RISK
+  RISK -.->|"批准范围 / 预占 / 期限"| BUS
+  BUS -.->|"稳定 ID 的执行指令"| EXEC
+  EXEC -.->|"逐腿成交 / 状态 / 费用"| BUS
+  EXEC -.-> IB

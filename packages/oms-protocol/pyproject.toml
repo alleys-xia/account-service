@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+[project]
+name = "oms-protocol"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = ["pydantic>=2.11,<3"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/oms_protocol"]

@@ -313,6 +313,23 @@ class Service:
                 continue
             internal[m["con_id"]] = internal.get(m["con_id"], Decimal(0)) + qty
         actual = {x["con_id"]: x for x in value["positions"]}
+        managed = value.get("managed_positions")
+        managed_mismatch = False
+        if managed is not None:
+            owned = {}
+            for p in managed:
+                m = mapping.get(p["instrument_id"])
+                if (
+                    not m
+                    or any(p[key] != m[key] for key in ("con_id", "instrument_version"))
+                    or amount(p["multiplier"]) != amount(m["multiplier"])
+                ):
+                    unmapped.append(p["instrument_id"])
+                    continue
+                owned[p["con_id"]] = amount(p["quantity"])
+            managed_mismatch = {k: v for k, v in internal.items() if v} != {
+                k: v for k, v in owned.items() if v
+            }
         external = []
         for con_id in sorted(set(internal) | set(actual)):
             row = actual.get(con_id, {})
@@ -331,8 +348,10 @@ class Service:
             (
                 "UNMAPPED"
                 if unmapped
+                else "MANAGED_POSITION_MISMATCH"
+                if managed_mismatch
                 else "EXTERNAL_OR_UNEXPLAINED"
-                if external
+                if external and managed is None
                 else "POSITIONS_MATCHED"
             ),
             external,

@@ -362,6 +362,7 @@ class Service:
                         order.pending = None
                         if operation == "submit" and order.status not in TERMINAL:
                             order.status = "EXPIRED" if reason == "APPROVAL_EXPIRED" else "REJECTED"
+                            order.reason = reason
                         await self.notify(
                             order,
                             "REPLACE_REJECTED" if operation == "replace" else order.status,
@@ -420,6 +421,7 @@ class Service:
                 order.pending = None
                 if pending["operation"] == "submit":
                     order.status = "EXPIRED"
+                    order.reason = "RISK_WAIT_EXPIRED"
                 await self.notify(
                     order,
                     "EXPIRED" if pending["operation"] == "submit" else "REPLACE_REJECTED",

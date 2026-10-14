@@ -2,7 +2,7 @@
 
 包含oms 持仓以及风控的模块
 
-**OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.2.1**，订单协议／客户端 **0.4.0**，Portfolio 客户端 **0.2.0**。
+**OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.3.0**，订单协议／客户端 **0.4.0**，Portfolio 客户端 **0.3.0**。
 
 适用于单账户、个人自用、秒级／分钟级策略。本机先运行；Linux Docker 后续实施。行情网关、Execution 和每个策略实例仍是独立进程。整个系统的业务进程数是 **3 + 策略实例数**，另有 NATS、PostgreSQL、Futu OpenD 和 IB Gateway。
 
@@ -29,7 +29,7 @@ account-service/
 - Execution 只读查询新鲜 IB 持仓和资金摘要，Portfolio 检查采集窗口和账本水位。已有或无法解释的仓位保留为**外部／未分配**，不自动分配策略。
 - 策略通过 `ctx.portfolio.snapshot()` 查询，通过 `on_recover` 和 `on_position_update` 获取完整视图；NATS ACL 限制其只能读取自身持仓。
 
-`POSITIONS_MATCHED` 只表示持仓数量匹配，不代表资金、保证金和税务对账完成。IB_PAPER 示例启用 `require_portfolio=true`：存在外部差异、快照过期或来源不可用时拒绝新增风险。已支持按原开仓批次卖出股票／单腿多头期权，以及整组平仓 bear call / bull put；Risk 原子预占可平数量，确认成交后释放相应持仓预算。所有平仓强制新鲜 Portfolio 门控。新开裸卖、拆保护腿、外部持仓归属、自动差异修复、行权／指派和实盘仍未开放。
+`POSITIONS_MATCHED` 表示 OMS/Portfolio 与 Execution 自有成交数量匹配，不代表资金、保证金和税务对账完成。手工及外部持仓单独列示，支持同合约共存；不会自动归属策略。IB_PAPER 示例启用 `require_portfolio=true`：内部数量不一致、快照过期或来源不可用时拒绝新增风险。已支持按原开仓批次卖出股票／单腿多头期权，以及整组平仓 bear call / bull put；Risk 原子预占可平数量，确认成交后释放相应持仓预算。所有平仓强制新鲜 Portfolio 门控。新开裸卖、拆保护腿、外部持仓归属、自动差异修复、行权／指派和实盘仍未开放。
 
 同进程提供模块与数据所有权边界，共享内存和故障范围；任一核心模块不可恢复故障会使整个账户进程退出。保留 `oms`、`risk`、`portfolio` 单模块入口用于排障，同一数据库不要与统一入口同时启动。
 
@@ -38,3 +38,5 @@ account-service/
 本版不实现统一监控、期权到期／指派处理、行情回放。平仓与风险额度闭环已实现，不新增独立服务；见 [设计及接口](docs/close-risk-design.md) 与 [本轮验收](docs/close-risk-acceptance.md)。本轮不实现具体策略。
 
 本次复核（0.2.1）：OMS 支持 Execution 经逐腿成交核对后的 BROKER_CANCELLED 终态；仅释放未成交预算，保留已成交持仓预算。已通过临时 PostgreSQL 回归与独立复核。需与 Execution 0.3.1 协调升级。
+
+本轮（0.3.0）增加[手工持仓共存](docs/manual-positions.md)，保留真实风控与持仓核验；修复拒单／超时原因未写入快照，以及费用超额时自有减仓被一并阻断。完整 IB 模拟联调见[验收记录](docs/ib-full-chain-20261014.md)。

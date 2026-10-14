@@ -28,6 +28,10 @@ class Mapping(FrozenModel):
     multiplier: Amount = Field(gt=0)
 
 
+class ManagedPosition(Mapping):
+    quantity: Amount
+
+
 class AccountValue(FrozenModel):
     tag: str
     currency: str
@@ -46,6 +50,8 @@ class BrokerSnapshot(Scoped):
     positions: tuple[BrokerPosition, ...]
     catalog: tuple[Mapping, ...]
     account_values: tuple[AccountValue, ...]
+    # None is a legacy producer without an independent owned-execution projection.
+    managed_positions: tuple[ManagedPosition, ...] | None = None
 
     @model_validator(mode="after")
     def valid(self):
@@ -56,7 +62,17 @@ class BrokerSnapshot(Scoped):
             [x.con_id for x in self.catalog],
             [x.instrument_id for x in self.catalog],
             [(x.tag, x.currency) for x in self.account_values],
+            [x.con_id for x in self.managed_positions or ()],
+            [x.instrument_id for x in self.managed_positions or ()],
         ):
             if len(set(values)) != len(values):
                 raise ValueError("duplicate snapshot identity")
+        catalog = {x.instrument_id: x for x in self.catalog}
+        for position in self.managed_positions or ():
+            reference = catalog.get(position.instrument_id)
+            if reference is None or any(
+                getattr(reference, key) != getattr(position, key)
+                for key in ("con_id", "instrument_version", "multiplier")
+            ):
+                raise ValueError("managed position does not match broker catalog")
         return self

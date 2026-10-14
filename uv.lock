@@ -4,7 +4,7 @@ requires-python = "==3.11.*"
 
 [[package]]
 name = "account-service"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "nats-py" },
@@ -25,7 +25,7 @@ requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
     { name = "oms-client", path = ".cache/wheels/oms_client-0.4.0-py3-none-any.whl" },
     { name = "oms-protocol", path = ".cache/wheels/oms_protocol-0.4.0-py3-none-any.whl" },
-    { name = "portfolio-client", path = ".cache/wheels/portfolio_client-0.2.0-py3-none-any.whl" },
+    { name = "portfolio-client", path = ".cache/wheels/portfolio_client-0.3.0-py3-none-any.whl" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.11,<3" },
 ]
@@ -85,15 +85,15 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
 
 [[package]]
 name = "portfolio-client"
-version = "0.2.0"
-source = { path = ".cache/wheels/portfolio_client-0.2.0-py3-none-any.whl" }
+version = "0.3.0"
+source = { path = ".cache/wheels/portfolio_client-0.3.0-py3-none-any.whl" }
 dependencies = [
     { name = "nats-py" },
     { name = "oms-protocol" },
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "portfolio_client-0.2.0-py3-none-any.whl", hash = "sha256:3445bdd7bcaef7223c6d8c4b56fec69773048aaebd719261c8f87c1958ebc6a9" },
+    { filename = "portfolio_client-0.3.0-py3-none-any.whl", hash = "sha256:6ad25facdff217b0955ce79127019cc0e015cf9054f70b754f3c37f55497f7a4" },
 ]
 
 [package.metadata]

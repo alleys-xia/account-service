@@ -1,4 +1,5 @@
 require_portfolio = true
+fee_buffer_per_unit_per_leg = "2"
 environment = "paper"
 mode = "IB_PAPER"
 account_id = "paperib"

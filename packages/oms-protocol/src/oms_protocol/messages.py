@@ -55,6 +55,7 @@ class OrderCommand(Scoped):
 
 
 class RiskRequest(Scoped):
+    feed_epoch: Token
     message_id: Identifier
     order_id: Identifier
     strategy_instance_id: Token

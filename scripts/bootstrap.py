@@ -33,7 +33,7 @@ def main():
         shutil.copy2(package / "dist" / filename, wheels / filename)
     if not args.locked:
         call("lock", "--upgrade-package", "oms-protocol", "--upgrade-package", "oms-client")
-    call("sync", "--locked", "--no-editable")
+    call("sync", "--locked", "--no-editable", "--reinstall-package", "oms-service")
 
 
 if __name__ == "__main__":

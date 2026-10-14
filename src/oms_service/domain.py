@@ -46,6 +46,8 @@ class Order(BaseModel):
 
     def view(self):
         return self.model_dump(mode="json", exclude={"session_token", "executions", "pending"}) | {
+            "pending_stage": self.pending.get("stage") if self.pending else None,
+            "pending_request_id": self.pending.get("request_id") if self.pending else None,
             "pending_operation": self.pending.get("operation") if self.pending else None,
             "pending_intent_revision": self.pending.get("revision") if self.pending else None,
         }

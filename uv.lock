@@ -22,31 +22,31 @@ wheels = [
 
 [[package]]
 name = "oms-client"
-version = "0.1.0"
-source = { path = ".cache/wheels/oms_client-0.1.0-py3-none-any.whl" }
+version = "0.2.0"
+source = { path = ".cache/wheels/oms_client-0.2.0-py3-none-any.whl" }
 dependencies = [
     { name = "nats-py" },
     { name = "oms-protocol" },
 ]
 wheels = [
-    { filename = "oms_client-0.1.0-py3-none-any.whl", hash = "sha256:5812ae8364bd962156ef2dbe29da3057ba0b6c6fd84dc2f317120d0d6fa810b1" },
+    { filename = "oms_client-0.2.0-py3-none-any.whl", hash = "sha256:8c57a7a298c694319bb56b7e61e9f8d8b54ebc7b712e5d74e8a875242940cd14" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
-    { name = "oms-protocol", specifier = "==0.1.0" },
+    { name = "oms-protocol", specifier = "==0.2.0" },
 ]
 
 [[package]]
 name = "oms-protocol"
-version = "0.1.0"
-source = { path = ".cache/wheels/oms_protocol-0.1.0-py3-none-any.whl" }
+version = "0.2.0"
+source = { path = ".cache/wheels/oms_protocol-0.2.0-py3-none-any.whl" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "oms_protocol-0.1.0-py3-none-any.whl", hash = "sha256:d5dca7cad99479d14b4031ceef8de5b151f51badaa3efcfca13e099272eb0531" },
+    { filename = "oms_protocol-0.2.0-py3-none-any.whl", hash = "sha256:0c8ca1832560edab72764c4ffee3a799eea3dd481f4df664420094a112f4f2b6" },
 ]
 
 [package.metadata]
@@ -54,7 +54,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
 
 [[package]]
 name = "oms-service"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "nats-py" },
@@ -72,8 +72,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
-    { name = "oms-client", path = ".cache/wheels/oms_client-0.1.0-py3-none-any.whl" },
-    { name = "oms-protocol", path = ".cache/wheels/oms_protocol-0.1.0-py3-none-any.whl" },
+    { name = "oms-client", path = ".cache/wheels/oms_client-0.2.0-py3-none-any.whl" },
+    { name = "oms-protocol", path = ".cache/wheels/oms_protocol-0.2.0-py3-none-any.whl" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.11,<3" },
 ]

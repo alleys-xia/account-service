@@ -102,6 +102,7 @@ class Service:
         )
         request = RiskRequest(
             message_id=request_id,
+            feed_epoch=self.store.feed_epoch,
             account_id=order.account_id,
             environment=order.environment,
             order_id=order.order_id,
@@ -325,7 +326,7 @@ class Service:
                 else:
                     reason = None
                     if not decision.approved:
-                        reason = "RISK_REJECTED"
+                        reason = "RISK_REJECTED:" + (decision.reason or "UNSPECIFIED")
                     elif decision.applied_account_seq < request.required_account_seq:
                         raise ProtocolError("RISK_WATERMARK_BEHIND")
                     elif (
@@ -585,4 +586,43 @@ class Service:
                 blocked=await self.store.meta("blocked"),
                 pending_outbox=pending["n"],
                 feed_epoch=self.store.feed_epoch,
+            )
+
+    async def account_rpc(self, request):
+        """NATS ACL restricts this account-wide endpoint to Risk/operators, never strategies."""
+        self.scope(request)
+        async with self.store.transaction():
+            head = await self.store.meta("account_seq", 0)
+            if request.feed_epoch is not None and request.feed_epoch != self.store.feed_epoch:
+                raise ProtocolError("FEED_EPOCH_MISMATCH")
+            if request.after_seq > head:
+                raise ProtocolError("ACCOUNT_CURSOR_AHEAD")
+            events = []
+            if request.operation == "events":
+                rows = await self.store.all(
+                    "SELECT seq,event_id,payload FROM oms.journal WHERE seq>%s ORDER BY seq LIMIT %s",
+                    (request.after_seq, request.limit),
+                )
+                size = 0
+                for row in rows:
+                    event = dict(
+                        schema_version=1,
+                        environment=self.settings.environment,
+                        account_id=self.settings.account_id,
+                        feed_epoch=self.store.feed_epoch,
+                        account_seq=row["seq"],
+                        event_id=row["event_id"],
+                        payload=row["payload"],
+                    )
+                    size += len(encode(event).encode())
+                    if size > 524288:
+                        break
+                    events.append(event)
+            return dict(
+                feed_epoch=self.store.feed_epoch,
+                account_seq=head,
+                events=events,
+                blocked=await self.store.meta("blocked"),
+                mode="SIMULATION",
+                trade_ready=False,
             )

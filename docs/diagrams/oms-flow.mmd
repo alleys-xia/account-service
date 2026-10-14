@@ -4,7 +4,7 @@ flowchart LR
   BUS["NATS JetStream<br/>账户与策略隔离"]
   OMS["OMS 独立进程<br/>受理 / 状态机 / 幂等 / 路由"]
   DB[("PostgreSQL<br/>订单 + inbox + journal + outbox")]
-  RISK["Risk 独立进程<br/>后续实现"]
+  RISK["Risk 独立进程<br/>v0.1 模拟域"]
   EXEC["Execution 独立进程<br/>后续实现"]
   IB["ib_async / IB Gateway<br/>后续实盘链路"]
   MD["行情网关独立进程<br/>Futu OpenD"]

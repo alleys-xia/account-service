@@ -2,7 +2,7 @@
 
 第三个独立业务仓库。OMS 负责订单接收、状态、成交记录、幂等、回报路由与恢复；策略通过本仓库的协议和 SDK 调用，不直接接触执行通道。
 
-当前版本 **0.1.0**，适用于本机 Python 3.11、PostgreSQL 16 和 NATS JetStream。服务只允许 `paper / SIMULATION`，`trade_ready` 始终为 `false`。真实 Risk、Execution、IB Gateway 和 Docker 留在后续模块实施。
+当前版本 **0.2.0**，适用于本机 Python 3.11、PostgreSQL 16 和 NATS JetStream。服务只允许 `paper / SIMULATION`，`trade_ready` 始终为 `false`。独立 Risk 已接入模拟域；Execution、IB Gateway 和 Docker 留在后续模块实施。
 
 ## 已实现
 
@@ -42,11 +42,12 @@ createdb oms_dev
 
 `createdb` 仅用于首次建立专用空库，已经存在时跳过。OMS 自动安装自己的 `oms` schema，拒绝复用身份或版本不匹配的库。`.env` 以 0600 权限创建，重复初始化不会覆盖。
 
-行情与订单可以共用一个 NATS 服务。`config/nats.dev.conf` 提供 gateway、oms、alpha、beta 的组合权限。该配置替代单独行情版 NATS 配置；不要在同一个端口同时启动两个服务。启动前加载两个仓库的私有配置：
+行情与订单可以共用一个 NATS 服务。`config/nats.dev.conf` 提供 gateway、oms、risk、alpha、beta 的组合权限。该配置替代单独行情版 NATS 配置；不要在同一个端口同时启动两个服务。启动前加载三个仓库的私有配置：
 
 ```bash
 source ../market-data-gateway/.env
 source .env
+source ../risk/.env
 ../market-data-gateway/data/tools/nats-server-v2.15.1-darwin-arm64/nats-server -c config/nats.dev.conf
 ```
 
@@ -57,11 +58,11 @@ source .env
 .venv/bin/oms --config config/oms.example.toml
 ```
 
-启动顺序：PostgreSQL → NATS → 行情网关与 OMS → 后续的 Risk / Execution → 各策略。没有 Risk 时，新单等待风控，决策期限到达后过期；OMS 不自行批准风险。
+启动顺序：PostgreSQL → NATS → 行情网关与 OMS → Risk → 后续 Execution → 各策略。没有 Risk 时，新单等待风控，决策期限到达后过期；OMS 不自行批准风险。
 
 ## 策略接入
 
-先在 `strategies` 中执行 Python 3.11 的 `scripts/bootstrap.py`，安装 OMS 协议、SDK 以及 API / Runtime **0.3.0**。现有 `observe`、`mock` 模式仍保留。
+先在 `strategies` 中执行 Python 3.11 的 `scripts/bootstrap.py`，安装 OMS 协议、SDK 以及 API / Runtime **0.3.1**。现有 `observe`、`mock` 模式仍保留。
 
 实例配置：
 
@@ -89,3 +90,5 @@ password_env = "STRATEGY_OMS_PASSWORD"
 添加策略时同步配置 NATS 的专属 subject / durable 权限和 OMS 的 `strategies` 列表，再启动独立实例。切换 observe/mock/oms 时采用新的状态目录，不能直接混用旧 SQLite 状态。
 
 [模块设计与架构图](docs/design.md) · [接口契约](docs/interfaces.md) · [运行与恢复](docs/operations.md) · [验证记录及边界](docs/acceptance.md)
+
+0.2 更新新增带 epoch 的 RiskRequest、专属账户回放 RPC 和 Risk durable。旧 Mock 环境切换请先阅读 [Risk 迁移说明](../risk/docs/operations.md)，不直接混用旧待审消息。

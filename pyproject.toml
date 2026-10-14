@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 [project]
 name = "oms-service"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["oms-protocol==0.1.0", "oms-client==0.1.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
+dependencies = ["oms-protocol==0.2.0", "oms-client==0.2.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
 [project.scripts]
 oms = "oms_service.app:main"
 [tool.hatch.build.targets.wheel]
@@ -13,8 +13,8 @@ packages = ["src/oms_service"]
 [dependency-groups]
 dev = ["ruff>=0.12,<1"]
 [tool.uv.sources]
-oms-protocol = { path = ".cache/wheels/oms_protocol-0.1.0-py3-none-any.whl" }
-oms-client = { path = ".cache/wheels/oms_client-0.1.0-py3-none-any.whl" }
+oms-protocol = { path = ".cache/wheels/oms_protocol-0.2.0-py3-none-any.whl" }
+oms-client = { path = ".cache/wheels/oms_client-0.2.0-py3-none-any.whl" }
 [tool.ruff]
 line-length = 100
 target-version = "py311"

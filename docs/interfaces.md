@@ -29,9 +29,9 @@
 
 ## 风控、执行交接
 
-RiskRequest 包含 request_id、完整意图摘要、意图版本和必须追平的账户流水位置。RiskDecision 必须原样关联，并提供 reservation_id、明确数量／限价、valid_until 和 applied_account_seq。OMS 在生成执行命令时复核这些字段、策略租约和期限；不接受“批准了一个大概相同的订单”。
+RiskRequest（0.2）包含 feed_epoch、message_id、完整意图摘要、意图版本和必须追平的账户流水位置。RiskDecision 必须原样关联，并提供 reservation_id、明确数量／限价、valid_until 和 applied_account_seq。OMS 在生成执行命令时复核这些字段、策略租约和期限；不接受“批准了一个大概相同的订单”。
 
-`risk_resolution: NOT_DISPATCHED` 表示该批准未生成对应执行命令，可作为未来 Risk 释放相应预占的依据。`DISPATCH_PREPARED` / `UNKNOWN` 不证明券商未受理，不能据此释放额度或重新生成新单。成交、撤单的最终额度调整由未来 Risk 消费账户流水完成。
+`risk_resolution: NOT_DISPATCHED` 表示该批准未生成对应执行命令，可作为Risk 释放相应预占的依据。`DISPATCH_PREPARED` / `UNKNOWN` 不证明券商未受理，不能据此释放额度或重新生成新单。成交、撤单的最终额度调整由Risk 消费账户流水完成。
 
 ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行器必须持久化指令与券商 ID 映射、确认合约元数据和权限、复核 SIMULATION 域／有效期限／策略 epoch，并在自身不确定时查询券商、报告 `UNKNOWN`。**消息总线的去重窗口不能提供券商下单的 exactly-once 保证。** 本版本不包含这些券商侧功能。
 
@@ -52,3 +52,7 @@ ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行�
 启动恢复先取得 OMS 快照水位，再从 PostgreSQL journal 补齐本地尚未处理的回报到该水位；随后执行 on_recover / on_start。JetStream 重复投递按 event_id、成交 ID、版本去重，不重复调用已提交回调。发现 feed_epoch 变化、序号缺口或连接丢失会停止决策并要求重新恢复，不能猜测跳过。
 
 快照当前上限为每策略 1,000 个订单、512 KiB；超过时明确拒绝，避免返回截断状态。历史回放每页最多 500 条且限制为 512 KiB。意图上限 16 KiB。扩大规模前应实现快照分页／终态订单归档并升级契约，不得直接删除订单或流水绕过容量限制。
+
+## Risk 账户回放（0.2）
+
+`paper.v1.rpc.oms-risk.default` 使用 `oms_protocol.account.AccountRpcRequest`，只允许 Risk 身份访问。head 返回 feed_epoch/account_seq/blocked；events 提交 feed_epoch/after_seq/limit（1–500），返回带 epoch 和连续 account_seq 的 AccountEvent，单页约 512 KiB 上限。游标超前或 epoch 不符明确拒绝，策略账号不能读取账户全量事件。Risk 在审批前追平 required_account_seq。订单 view 新增 pending_request_id 用于精确关联，pending_stage 区分待风控与待执行改单，供 Risk 核验对应版本预占是否存在；Risk 拒绝原因以 `RISK_REJECTED:<code>` 回给策略。

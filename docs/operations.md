@@ -36,3 +36,7 @@ SELECT channel, message_id, reason, recorded_at FROM oms.quarantine ORDER BY id 
 订单数据库、策略 SQLite 和 JetStream 数据必须备份并一致恢复。单独回退一个组件可能产生 feed 水位冲突，此时停止而非跳过。协议当前 schema_version=1，未来升级以迁移脚本和兼容版本发布；禁止运行未知 schema 的程序。
 
 Risk / Execution 接入前还必须完成：合约资格与乘数、券商原始成交/费用转换、券商 ID 持久化、预占与账户对账、执行 fencing、kill switch、完整的到期/行权/指派与股票持仓事件。OMS v0.1 不接管这些职责。
+
+## Risk v0.1 接入
+
+0.2 已接入独立 Risk 模拟服务，账户/策略限额及预占由其负责；上文真实 Execution、Portfolio 和券商资格/对账要求仍未实现。切换旧 Mock 数据前先阅读 [Risk 运行与迁移](../../risk/docs/operations.md)。

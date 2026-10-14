@@ -132,6 +132,7 @@ class Store:
             environment=self.header["environment"],
             account_id=self.account_id,
             account_seq=seq,
+            feed_epoch=self.feed_epoch,
             event_id=event_id,
             payload=payload,
         )

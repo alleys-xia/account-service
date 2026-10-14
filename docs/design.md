@@ -11,7 +11,7 @@ flowchart LR
   BUS["NATS JetStream<br/>账户与策略隔离"]
   OMS["OMS 独立进程<br/>受理 / 状态机 / 幂等 / 路由"]
   DB[("PostgreSQL<br/>订单 + inbox + journal + outbox")]
-  RISK["Risk 独立进程<br/>后续实现"]
+  RISK["Risk 独立进程<br/>v0.1 模拟域"]
   EXEC["Execution 独立进程<br/>后续实现"]
   IB["ib_async / IB Gateway<br/>后续实盘链路"]
   MD["行情网关独立进程<br/>Futu OpenD"]
@@ -27,13 +27,13 @@ flowchart LR
   EXEC -.-> IB
 ```
 
-实线为本轮实现；虚线为后续模块边界。本次验收使用临时独立模拟进程替代 Risk / Execution。
+实线为本轮实现；虚线为后续模块边界。原 0.1 验收使用临时 Risk / Execution；0.2 已接入独立 Risk 仓库，Execution 仍用临时模拟进程。
 
 ## 目标与边界
 
 OMS 负责订单受理、数据库幂等、状态机、风险请求、执行命令、订单／逐腿成交 journal、策略归属及恢复快照。Risk 决定风险政策和预占，Execution 连接券商并核对真实订单，Portfolio 核算账户资产。OMS 不直接连接 IB，不实现资金风控规则，不把订单记录声称为持仓账本。
 
-本轮仅启用 paper + SIMULATION 执行域。独立模拟 Risk／Execution 仅用于临时验收，不随交付保留，不能被当作已实现的真实模块。无真实下单，trade_ready=false。真实 Risk／Execution 尚未部署时，受理订单可以停留 RISK_PENDING，绝不自动批准。
+本轮仅启用 paper + SIMULATION 执行域。Risk v0.1 已实现独立进程与额度账本；Execution 模拟器仅用于临时验收，不随交付保留。无真实下单，trade_ready=false。Risk／Execution 尚未启动时，受理订单可以停留 RISK_PENDING，绝不自动批准。
 
 首期接受 LIMIT 整股股票、单腿期权、开仓 bear call/bull put 两腿等比例价差；同一个组合 order_id 始终携带全部 legs。修改只允许净限价变化，其余合约、方向、数量、TIF 不变，决策期限可更新，重新风控且原单保持工作，待执行确认后生效；更广的改单通过未来明确能力扩展。撤单请求失败不等于原订单拒绝。组合摘要只表进度，实际成交必须逐腿记录；不产生双重账本。
 

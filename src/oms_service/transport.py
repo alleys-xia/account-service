@@ -14,6 +14,7 @@ from nats.js.api import (
     StreamConfig,
 )
 from nats.js.errors import NotFoundError
+from oms_protocol.account import AccountRpcRequest
 from oms_protocol.common import digest, encode
 from oms_protocol.messages import (
     ExecutionReport,
@@ -146,6 +147,14 @@ class Transport:
                 f"{prefix}.evt.oms.{account}.strategy.{strategy}",
             )
             await subscription.unsubscribe()  # Provision only; the strategy owns consumption.
+        subscription = await self.consumer("risk_checks", f"{prefix}.cmd.risk.{account}.check")
+        await subscription.unsubscribe()
+        await self.nc.subscribe(
+            f"{prefix}.rpc.oms-risk.{account}",
+            cb=self.account_rpc,
+            pending_msgs_limit=64,
+            pending_bytes_limit=1048576,
+        )
         for name, subject, model, handler in (
             ("oms_commands", f"{prefix}.cmd.oms.{account}.*", OrderCommand, self.service.command),
             ("oms_risk", f"{prefix}.evt.risk.{account}.decision", RiskDecision, self.service.risk),
@@ -205,6 +214,27 @@ class Transport:
             request_id = request.request_id
             async with asyncio.timeout(self.settings.rpc_timeout):
                 result = await self.service.rpc(request, message.subject.rsplit(".", 1)[1])
+            response = RpcResponse(request_id=request_id, ok=True, data=result)
+        except (ProtocolError, ValidationError, TimeoutError) as error:
+            response = RpcResponse(
+                request_id=request_id,
+                ok=False,
+                error=error.code if isinstance(error, ProtocolError) else type(error).__name__,
+            )
+        except Exception as error:
+            if not self.failure.done():
+                self.failure.set_result(error)
+            response = RpcResponse(request_id=request_id, ok=False, error="SERVICE_UNAVAILABLE")
+        if message.reply:
+            await message.respond(response.model_dump_json().encode())
+
+    async def account_rpc(self, message):
+        request_id = "invalid"
+        try:
+            request = AccountRpcRequest.model_validate_json(message.data)
+            request_id = request.request_id
+            async with asyncio.timeout(self.settings.rpc_timeout):
+                result = await self.service.account_rpc(request)
             response = RpcResponse(request_id=request_id, ok=True, data=result)
         except (ProtocolError, ValidationError, TimeoutError) as error:
             response = RpcResponse(

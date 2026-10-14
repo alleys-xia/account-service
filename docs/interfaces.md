@@ -1,3 +1,5 @@
+> 0.4.0：新增明确持仓批次的 SINGLE CLOSE／VERTICAL_CLOSE 和 ViewSnapshot.position_lots；当前平仓契约以 [平仓与持仓风险闭环](close-risk-design.md) 为准。
+
 > 0.3.0 补充：RiskRequest/Decision、ExecutionCommand/Report 的 mode 支持 SIMULATION 与 IB_PAPER。IB_PAPER 执行命令强制 feed_epoch，submit/replace 强制 reservation_id。新增 ExecutionRpcRequest(head/authorize)，subject 为 paper.v1.rpc.oms-exec.<account>，只允许 Execution 身份使用；返回当前模式、epoch 和发送授权。旧版说明中的 simulation-only 仅对应原有默认模式。
 
 # OMS v1 接口契约
@@ -35,7 +37,7 @@ RiskRequest（0.2）包含 feed_epoch、message_id、完整意图摘要、意图
 
 `risk_resolution: NOT_DISPATCHED` 表示该批准未生成对应执行命令，可作为Risk 释放相应预占的依据。`DISPATCH_PREPARED` / `UNKNOWN` 不证明券商未受理，不能据此释放额度或重新生成新单。成交、撤单的最终额度调整由Risk 消费账户流水完成。
 
-ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行器必须持久化指令与券商 ID 映射、确认合约元数据和权限、复核 SIMULATION 域／有效期限／策略 epoch，并在自身不确定时查询券商、报告 `UNKNOWN`。**消息总线的去重窗口不能提供券商下单的 exactly-once 保证。** 本版本不包含这些券商侧功能。
+ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行器必须持久化指令与券商 ID 映射、确认合约元数据和权限、复核 SIMULATION 域／有效期限／策略 epoch，并在自身不确定时查询券商、报告 `UNKNOWN`。**消息总线的去重窗口不能提供券商下单的 exactly-once 保证。** 这些券商侧功能由独立 Execution 服务实现。
 
 订单生命周期、发送确定性、撤单状态和一致性分开记录。通过风控后的 `DISPATCH_PENDING / PREPARED` 表示执行命令已写入事务；收到 ACK 才是 `SUBMITTED / ACKNOWLEDGED`。未知结果或冲突执行回报会冻结账户的新单和改单，撤单入口保留。
 

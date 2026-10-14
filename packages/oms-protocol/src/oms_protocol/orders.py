@@ -4,9 +4,17 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_serializer,
+    model_validator,
+)
 
-from .common import Token, utcnow
+from .common import Identifier, Token, utcnow
 
 
 def decimal_input(value):
@@ -58,7 +66,8 @@ class OrderLeg(FrozenModel):
 
 
 class OrderIntent(FrozenModel):
-    structure: Literal["SINGLE", "VERTICAL_CREDIT"] = "SINGLE"
+    structure: Literal["SINGLE", "VERTICAL_CREDIT", "VERTICAL_CLOSE"] = "SINGLE"
+    close_position_id: Identifier | None = None
     legs: tuple[OrderLeg, ...] = Field(min_length=1, max_length=2)
     quantity: Amount = Field(gt=0)
     order_type: Literal["LIMIT"] = "LIMIT"
@@ -71,6 +80,14 @@ class OrderIntent(FrozenModel):
     deadline_at: AwareDatetime
     quote_references: tuple[dict[str, Any], ...] = Field(default=(), max_length=16)
 
+    @model_serializer(mode="wrap")
+    def wire(self, handler):
+        value = handler(self)
+        # Preserve canonical hashes of existing OPEN intents and nested commands.
+        if self.close_position_id is None:
+            value.pop("close_position_id", None)
+        return value
+
     @model_validator(mode="after")
     def valid_structure(self):
         if len(self.model_dump_json().encode()) > 16384:
@@ -81,12 +98,19 @@ class OrderIntent(FrozenModel):
             raise ValueError("v1 supports whole shares/contracts only")
         if len({leg.instrument_id for leg in self.legs}) != len(self.legs):
             raise ValueError("each leg requires a distinct instrument identity")
+        closing = self.close_position_id is not None
+        if any(x.position_effect != ("CLOSE" if closing else "OPEN") for x in self.legs):
+            raise ValueError("all close legs require a position target; effects cannot be mixed")
         if self.structure == "SINGLE":
             if len(self.legs) != 1 or self.legs[0].ratio != 1:
                 raise ValueError("SINGLE requires one ratio-1 leg")
+            if closing and (self.legs[0].side != "SELL" or self.net_price_effect != "CREDIT"):
+                raise ValueError("single close supports SELL/CREDIT against a long lot only")
         else:
-            if len(self.legs) != 2 or self.net_price_effect != "CREDIT":
-                raise ValueError("vertical credit requires two legs and CREDIT")
+            if closing != (self.structure == "VERTICAL_CLOSE"):
+                raise ValueError("vertical structure must match its position effect")
+            if len(self.legs) != 2 or self.net_price_effect != ("DEBIT" if closing else "CREDIT"):
+                raise ValueError("vertical requires two legs, CREDIT open or DEBIT close")
             short = next((x for x in self.legs if x.side == "SELL"), None)
             long = next((x for x in self.legs if x.side == "BUY"), None)
             if short is None or long is None:
@@ -100,8 +124,8 @@ class OrderIntent(FrozenModel):
                 long.position_effect,
             ):
                 raise ValueError("vertical legs must share underlying/expiry/right/effect")
-            if short.position_effect != "OPEN":
-                raise ValueError("vertical credit builder describes opening intents only")
+            if closing:
+                short, long = long, short  # Original short/long identities.
             if (short.right == "CALL" and short.strike >= long.strike) or (
                 short.right == "PUT" and short.strike <= long.strike
             ):
@@ -112,6 +136,27 @@ class OrderIntent(FrozenModel):
     def vertical_credit(cls, short: OrderLeg, long: OrderLeg, **kwargs):
         return cls(
             structure="VERTICAL_CREDIT", legs=(short, long), net_price_effect="CREDIT", **kwargs
+        )
+
+    @classmethod
+    def close_position(cls, position_id: str, opening: "OrderIntent", **kwargs):
+        """Build the inverse intent; Risk still verifies ownership and available quantity."""
+        if opening.close_position_id or (
+            opening.structure == "SINGLE" and opening.legs[0].side != "BUY"
+        ):
+            raise ValueError("expected a long single or credit vertical opening intent")
+        legs = tuple(
+            leg.model_copy(
+                update={"side": "SELL" if leg.side == "BUY" else "BUY", "position_effect": "CLOSE"}
+            )
+            for leg in opening.legs
+        )
+        return cls(
+            structure="SINGLE" if opening.structure == "SINGLE" else "VERTICAL_CLOSE",
+            close_position_id=position_id,
+            legs=legs,
+            net_price_effect="CREDIT" if opening.structure == "SINGLE" else "DEBIT",
+            **kwargs,
         )
 
 
@@ -171,6 +216,7 @@ class ExecutionEvent(FrozenModel):
 class ViewSnapshot(FrozenModel):
     status: Literal["AVAILABLE", "UNAVAILABLE"]
     items: tuple[dict[str, Any], ...] = ()
+    position_lots: tuple[dict[str, Any], ...] = ()
     as_of: AwareDatetime = Field(default_factory=utcnow)
     applied_account_seq: int | None = None
     strategy_seq: int | None = None

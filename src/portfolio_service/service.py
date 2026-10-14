@@ -8,6 +8,7 @@ from oms_protocol.messages import ProtocolError
 from psycopg.types.json import Jsonb
 
 from .ledger import amount, fold, record
+from .lots import build_lots
 
 
 class Service:
@@ -217,6 +218,19 @@ class Service:
             if len(rows) > self.settings.max_positions:
                 raise ProtocolError("POSITION_SNAPSHOT_CAPACITY")
             positions = [x["data"] for x in rows]
+            orders = await self.store.all("SELECT data FROM portfolio.orders")
+            lot_error = None
+            try:
+                lots = [
+                    x
+                    for x in build_lots(r["data"] for r in orders).values()
+                    if amount(x["risk_quantity"]) > 0 or x["state"] != "SETTLED"
+                ]
+                if len(lots) > self.settings.max_positions:
+                    raise ProtocolError("POSITION_LOT_CAPACITY")
+            except ProtocolError as exc:
+                lots, lot_error = [], exc.code
+                await self.store.set_meta("blocked", lot_error)
             seq, revision = (
                 await self.store.meta("account_seq", 0),
                 await self.store.meta("ledger_revision", 0),
@@ -241,6 +255,9 @@ class Service:
                     p
                     for p in positions
                     if strategy is None or p["strategy_instance_id"] == strategy
+                ],
+                position_lots=[
+                    x for x in lots if strategy is None or x["strategy_instance_id"] == strategy
                 ],
                 as_of=utcnow().isoformat(),
                 applied_account_seq=seq,

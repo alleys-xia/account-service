@@ -18,6 +18,8 @@ class Usage:
     committed: Decimal = ZERO
     open_orders: int = 0
     requests_last_minute: int = 0
+    pending: Decimal = ZERO
+    position: Decimal = ZERO
 
 
 @dataclass(frozen=True)
@@ -49,7 +51,18 @@ class Engine:
     def __init__(self, settings: Settings, *, extra_rules: tuple[Rule, ...] = ()):
         self.settings, self.extra_rules = settings, extra_rules
 
-    def evaluate(self, intent, strategy_id, account, strategy, previous_cost, now):
+    def evaluate(
+        self,
+        intent,
+        strategy_id,
+        account,
+        strategy,
+        previous_cost,
+        now,
+        *,
+        reduce_only=False,
+        replacing=False,
+    ):
         s = self.settings
 
         def reject(reason):
@@ -62,10 +75,11 @@ class Engine:
         age = (now - intent.decision_time).total_seconds()
         if age < -2 or age > s.max_decision_age:
             return reject("STALE_DECISION")
+        closing = intent.close_position_id is not None
+        if closing != reduce_only:
+            return reject("POSITION_VALIDATION_REQUIRED")
         for leg in intent.legs:
-            if leg.position_effect != "OPEN" or (
-                intent.structure == "SINGLE" and leg.side != "BUY"
-            ):
+            if not closing and (intent.structure == "SINGLE" and leg.side != "BUY"):
                 return reject("POSITION_SUPPORT_REQUIRED")
             reference = s.instruments.get(leg.instrument_id)
             if reference is None:
@@ -89,34 +103,42 @@ class Engine:
                     )
                 ):
                     return reject("INSTRUMENT_MISMATCH")
-                if (
-                    reference.expiry - now.astimezone(ZoneInfo("America/New_York")).date()
-                ).days < s.min_option_dte:
+                if (reference.expiry - now.astimezone(ZoneInfo("America/New_York")).date()).days < (
+                    0 if closing else s.min_option_dte
+                ):
                     return reject("OPTION_EXPIRY_TOO_CLOSE")
         multiplier = s.instruments[intent.legs[0].instrument_id].multiplier
         if intent.structure == "SINGLE":
-            if intent.net_price_effect != "DEBIT" or intent.limit_amount <= 0:
+            if (
+                intent.net_price_effect != ("CREDIT" if closing else "DEBIT")
+                or intent.limit_amount <= 0
+            ):
                 return reject("INVALID_DEBIT")
             base = expiry_loss = intent.limit_amount * multiplier * intent.quantity
         else:
             width = abs(intent.legs[0].strike - intent.legs[1].strike)
-            if not ZERO < intent.limit_amount < width:
-                return reject("INVALID_CREDIT")
+            if not ZERO < intent.limit_amount <= width or (
+                not closing and intent.limit_amount == width
+            ):
+                return reject("INVALID_CLOSE_DEBIT" if closing else "INVALID_CREDIT")
             base = width * multiplier * intent.quantity
             expiry_loss = (width - intent.limit_amount) * multiplier * intent.quantity
         cost = base + s.fee_buffer_per_unit_per_leg * len(intent.legs) * intent.quantity
+        order_cost = cost
+        if closing:
+            cost = expiry_loss = ZERO
         incremental = max(ZERO, cost - previous_cost)
         for name, limits, usage in (
             ("ACCOUNT", s.account, account),
             ("STRATEGY", s.strategies[strategy_id], strategy),
         ):
-            if limits.halted:
+            if limits.halted and not closing:
                 return reject(name + "_HALTED")
-            if cost > limits.max_order_cost:
+            if order_cost > limits.max_order_cost:
                 return reject(name + "_ORDER_COST_EXCEEDED")
-            if usage.committed + incremental > limits.max_committed:
+            if not closing and usage.committed + incremental > limits.max_committed:
                 return reject(name + "_BUDGET_EXCEEDED")
-            if usage.open_orders + (1 if previous_cost == 0 else 0) > limits.max_open_orders:
+            if usage.open_orders + (0 if replacing else 1) > limits.max_open_orders:
                 return reject(name + "_OPEN_ORDERS_EXCEEDED")
             maximum = (
                 limits.max_stock_quantity

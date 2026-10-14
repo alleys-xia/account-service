@@ -7,7 +7,10 @@ from oms_protocol.common import digest, uid, utcnow
 from oms_protocol.messages import ProtocolError, RiskDecision
 from psycopg.types.json import Jsonb
 
-from .ledger import TERMINAL, commitment, empty_order, project
+from portfolio_service.lots import build_lots, units, validate_close
+
+from .exposure import active, available_to_close, close_reserved, exposure, unit_cost
+from .ledger import TERMINAL, empty_order, facts_match, project
 from .policies import Assessment, Engine, Usage
 
 
@@ -48,9 +51,8 @@ class Service:
             raise ProtocolError(error)
 
     async def apply(self, event):
-        error = None
-        async with self.store.transaction():
-            try:
+        try:
+            async with self.store.transaction():
                 self.scope(event)
                 if event.feed_epoch != await self.store.meta("feed_epoch"):
                     raise ProtocolError("FEED_EPOCH_MISMATCH")
@@ -67,48 +69,57 @@ class Service:
                     raise ProtocolError("ACCOUNT_EVENT_GAP")
                 payload = event.payload
                 order_id = payload["order_id"]
+                if payload.get("state") and payload["state"]["order_id"] != order_id:
+                    raise ProtocolError("ORDER_IDENTITY_CONFLICT")
                 order = await self.store.order(order_id) or empty_order()
                 issue = project(order, payload)
                 if issue:
                     await self.store.set_meta("blocked", issue)
                 await self.store.save_order(order_id, order)
+                # Catch cross-order corrections that would over-close a position.
+                await self.book()
                 await self.store.db.execute(
                     "INSERT INTO risk.events VALUES (%s,%s)", (event.account_seq, event_hash)
                 )
                 await self.store.set_meta("account_seq", event.account_seq)
-            except (KeyError, ValueError, TypeError) as exc:
-                error = exc.code if isinstance(exc, ProtocolError) else "INVALID_ACCOUNT_EVENT"
+        except (KeyError, ValueError, TypeError, ArithmeticError) as exc:
+            error = exc.code if isinstance(exc, ProtocolError) else "INVALID_ACCOUNT_EVENT"
+            async with self.store.transaction():
                 await self.store.set_meta("blocked", error)
-        if error:
-            raise ProtocolError(error)
+            raise ProtocolError(error) from None
 
-    async def usage(self, strategy):
-        # Caller holds the same transaction used to admit and reserve; no race across scopes.
-        rows = await self.store.all("SELECT data FROM risk.orders")
-        totals = [Decimal("0"), Decimal("0")]
-        opens = [0, 0]
-        unsettled = False
-        for row in rows:
-            order = row["data"]
-            view = order["view"]
-            if not view:
-                continue
-            amount = commitment(order)
-            is_open = amount > 0 and view["status"] not in TERMINAL
-            totals[0] += amount
-            opens[0] += is_open
-            if view["strategy_instance_id"] == strategy:
-                totals[1] += amount
-                opens[1] += is_open
-            if view["consistency"] != "CONSISTENT":
-                unsettled = True
+    async def book(self):
+        rows = await self.store.all("SELECT id,data FROM risk.orders")
+        orders = {r["id"]: r["data"] for r in rows}
+        lots = build_lots(o["view"] for o in orders.values() if o["view"])
+        for identity, lot in lots.items():
+            if lot["state"] == "SETTLED" and close_reserved(orders, identity) > Decimal(
+                lot["remaining_quantity"]
+            ):
+                raise ProtocolError("OVER_RESERVED_POSITION")
+        return orders, lots, exposure(orders, lots)
+
+    async def usage(self, strategy, book=None):
+        orders, lots, costs = book or await self.book()
+
+        def used(selected, count):
+            pending = sum((x["pending"] for x in selected), Decimal(0))
+            position = sum((x["position"] for x in selected), Decimal(0))
+            return Usage(
+                pending + position, sum(x["open"] for x in selected), count, pending, position
+            )
+
         counts = await self.store.one(
             "SELECT count(*) AS account, count(*) FILTER (WHERE strategy=%s) AS strategy FROM risk.requests WHERE created_at > now() - interval '1 minute'",
             (strategy,),
         )
+        unsettled = any(
+            o["view"] and (o["view"]["consistency"] != "CONSISTENT" or not facts_match(o))
+            for o in orders.values()
+        )
         return (
-            Usage(totals[0], opens[0], counts["account"]),
-            Usage(totals[1], opens[1], counts["strategy"]),
+            used(list(costs.values()), counts["account"]),
+            used([x for x in costs.values() if x["strategy"] == strategy], counts["strategy"]),
             unsettled,
         )
 
@@ -136,7 +147,9 @@ class Service:
                 if request.intent_hash != digest(request.intent.model_dump(mode="json")):
                     raise ProtocolError("INTENT_HASH_MISMATCH")
                 order = await self.store.order(request.order_id)
-                account, strategy, unsettled = await self.usage(request.strategy_instance_id)
+                book = await self.book()
+                orders, lots, costs = book
+                account, strategy, unsettled = await self.usage(request.strategy_instance_id, book)
                 now = utcnow()
                 reason = (
                     await self.store.meta("blocked")
@@ -160,8 +173,26 @@ class Service:
                     omitted = {"limit_amount", "decision_time", "deadline_at", "quote_references"}
                     old = {k: v for k, v in view["intent"].items() if k not in omitted}
                     new = request.intent.model_dump(mode="json", exclude=omitted)
-                    if old != new or commitment(order) == 0:
+                    if old != new or not active(order):
                         reason = "INVALID_REPLACEMENT"
+                closing = request.intent.close_position_id is not None
+                available = None
+                if not reason and closing:
+                    try:
+                        target = request.intent.close_position_id
+                        validate_close(
+                            request.intent, request.strategy_instance_id, lots.get(target)
+                        )
+                        if lots[target]["state"] != "SETTLED":
+                            raise ProtocolError("POSITION_LEGS_UNSETTLED")
+                        available = available_to_close(
+                            orders, lots, target, exclude=request.order_id
+                        )
+                        needed = request.intent.quantity - min(units(view))
+                        if needed <= 0 or needed > available:
+                            raise ProtocolError("INSUFFICIENT_CLOSE_QUANTITY")
+                    except ProtocolError as exc:
+                        reason = exc.code
                 pending = await self.store.one(
                     "SELECT count(*) AS n FROM risk.outbox WHERE NOT published"
                 )
@@ -175,8 +206,10 @@ class Service:
                         request.strategy_instance_id,
                         account,
                         strategy,
-                        commitment(order),
+                        unit_cost(order) * request.intent.quantity,
                         now,
+                        reduce_only=closing,
+                        replacing=request.operation == "replace",
                     )
                 )
                 decision = RiskDecision(
@@ -204,6 +237,8 @@ class Service:
                         reservation_id=decision.reservation_id,
                         revision=request.order_revision,
                         cost=str(assessment.cost),
+                        quantity=str(request.intent.quantity),
+                        close_position_id=request.intent.close_position_id,
                         active=True,
                         definitely_not_executed=False,
                         fee_buffer=str(
@@ -219,6 +254,9 @@ class Service:
                     cost=str(assessment.cost),
                     expiry_max_loss=str(assessment.expiry_max_loss),
                     account_before=str(account.committed),
+                    pending_before=str(account.pending),
+                    position_before=str(account.position),
+                    available_to_close=str(available) if available is not None else None,
                     strategy_before=str(strategy.committed),
                 )
                 await self.store.db.execute(
@@ -254,7 +292,10 @@ class Service:
             for strategy in self.settings.strategies:
                 account, current, unsettled = await self.usage(strategy)
                 usage[strategy] = dict(
-                    committed=str(current.committed), open_orders=current.open_orders
+                    committed=str(current.committed),
+                    open_orders=current.open_orders,
+                    pending=str(current.pending),
+                    position=str(current.position),
                 )
             return dict(
                 mode=self.settings.mode,
@@ -264,6 +305,8 @@ class Service:
                 blocked=await self.store.meta("blocked") or await self.store.meta("oms_blocked"),
                 legs_unsettled=unsettled,
                 account_committed=str(account.committed),
+                pending_risk=str(account.pending),
+                position_risk=str(account.position),
                 strategies=usage,
                 account_halted=self.settings.account.halted,
                 policy_hash=self.settings.policy_hash,

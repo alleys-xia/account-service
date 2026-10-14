@@ -135,6 +135,7 @@ class Transport:
                     hold = (
                         await self.portfolio_hold(request)
                         if self.settings.require_portfolio
+                        or request.intent.close_position_id is not None
                         else None
                     )
                     await self.service.decide(request, external_hold=hold)
@@ -159,9 +160,9 @@ class Transport:
                 != (s.account_id, s.mode, risk_request.feed_epoch)
             ):
                 return "PORTFOLIO_DOMAIN_OR_RESPONSE_INVALID"
-            if (
-                not data.get("safe_for_new_risk")
-                or data.get("applied_account_seq", -1) < risk_request.required_account_seq
+            _, risk_seq = await self.service.cursor()
+            if not data.get("safe_for_new_risk") or data.get("applied_account_seq", -1) < max(
+                risk_seq, risk_request.required_account_seq
             ):
                 return "PORTFOLIO_NOT_READY"
             return None

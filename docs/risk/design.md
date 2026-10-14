@@ -1,3 +1,5 @@
+> 当前版本补充：本页保留首期设计／验收背景；平仓和风险转换能力以 [当前闭环说明](../close-risk-design.md) 为准。
+
 > 仓库与部署更新：Risk 现为 account-service 内部模块，与 OMS、Portfolio 同进程，规则和数据边界不变。见 [当前模块边界](operations.md)。
 
 # Risk v0.1 设计

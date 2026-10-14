@@ -172,8 +172,11 @@ def apply_execution(original, report, command):
             order.dispatch_certainty = "ACKNOWLEDGED"
             status = "SUBMITTED"
     elif kind == "CANCELLED":
-        if command.operation != "cancel":
+        broker_cancelled = report.reason == "BROKER_CANCELLED"
+        if command.operation != "cancel" and not broker_cancelled:
             raise ProtocolError("CANCEL_REPORT_COMMAND_MISMATCH")
+        if broker_cancelled:
+            order.dispatch_certainty = "ACKNOWLEDGED"
         order.cancel_state = "CONFIRMED"
         if order.status != "FILLED":
             order.status = "CANCELLED"

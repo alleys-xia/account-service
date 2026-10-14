@@ -2,7 +2,7 @@
 
 包含oms 持仓以及风控的模块
 
-**OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.2.0**，订单协议／客户端 **0.4.0**，Portfolio 客户端 **0.2.0**。
+**OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.2.1**，订单协议／客户端 **0.4.0**，Portfolio 客户端 **0.2.0**。
 
 适用于单账户、个人自用、秒级／分钟级策略。本机先运行；Linux Docker 后续实施。行情网关、Execution 和每个策略实例仍是独立进程。整个系统的业务进程数是 **3 + 策略实例数**，另有 NATS、PostgreSQL、Futu OpenD 和 IB Gateway。
 
@@ -36,3 +36,5 @@ account-service/
 [当前架构](docs/portfolio-design.md) · [模块边界与状态](docs/operations.md) · [本轮验收](docs/portfolio-acceptance.md) · [订单接口](docs/interfaces.md) · [Risk 规则设计](docs/risk/design.md)
 
 本版不实现统一监控、期权到期／指派处理、行情回放。平仓与风险额度闭环已实现，不新增独立服务；见 [设计及接口](docs/close-risk-design.md) 与 [本轮验收](docs/close-risk-acceptance.md)。本轮不实现具体策略。
+
+本次复核（0.2.1）：OMS 支持 Execution 经逐腿成交核对后的 BROKER_CANCELLED 终态；仅释放未成交预算，保留已成交持仓预算。已通过临时 PostgreSQL 回归与独立复核。需与 Execution 0.3.1 协调升级。

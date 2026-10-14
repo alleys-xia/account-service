@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 [project]
 name = "account-service"
-version = "0.2.0"
+version = "0.2.1"
 requires-python = ">=3.11,<3.12"
 dependencies = ["portfolio-client==0.2.0", "oms-protocol==0.4.0", "oms-client==0.4.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
 [project.scripts]

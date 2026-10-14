@@ -66,3 +66,5 @@ ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行�
 OMS/Risk/Portfolio 同仓库同进程，保留本页既有协议。新增 `paper.v1.rpc.oms-portfolio.<account>`，使用 `AccountRpcRequest` 的 head/events 接口，只供 Portfolio 回放账户 journal。
 
 `paper.v1.rpc.exec.<account>.account` 提供 `portfolio_client.models.BrokerSnapshot`；`paper.v1.rpc.portfolio.<account>.account` 供 Risk/operator 获取账户视图，`paper.v1.rpc.portfolio.<account>.strategy.<strategy>` 供对应策略查询 ViewSnapshot。请求统一为 `portfolio_client.models.Request`，回复包裹 RpcResponse 并校验 request_id。详细状态、新鲜度和权限边界见 [运行手册](operations.md)。
+
+0.2.1 补充：可信 Execution 的 CANCELLED 回报可以关联 submit / replace，条件是 reason=BROKER_CANCELLED，且执行器已完成券商累计成交与逐腿成交的严格核对。OMS 标记 ACKNOWLEDGED，保留已有 FILLED 与 RECONCILIATION_REQUIRED 语义；其他非 cancel 命令的无标记取消回报继续拒绝。wire v1 字段未变，部署时账户服务需先于或同步于 Execution 0.3.1 升级。

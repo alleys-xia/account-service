@@ -1,3 +1,5 @@
+> 当前 0.3.0 新增 IB_PAPER。旧无 mode header 仅按 SIMULATION 兼容，不能将旧库切为 IB 发单。IB 模拟账户使用独立 paperib 别名/数据库/消息存储；配置见 ../../execution/README.md。原模拟模式运行方式保持不变。
+
 # 运行与恢复
 
 ## 单机进程

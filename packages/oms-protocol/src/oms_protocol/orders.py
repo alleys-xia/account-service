@@ -35,10 +35,19 @@ class OrderLeg(FrozenModel):
     expiry: date | None = None
     right: Literal["CALL", "PUT"] | None = None
     strike: Amount | None = Field(default=None, gt=0)
+    underlying_type: Literal["EQUITY", "INDEX"] = "EQUITY"
+    settlement: Literal["PHYSICAL", "CASH"] = "PHYSICAL"
+    exercise_style: Literal["AMERICAN", "EUROPEAN"] = "AMERICAN"
 
     @model_validator(mode="after")
     def valid_instrument(self):
         if self.asset_type == "OPTION":
+            if (self.settlement, self.exercise_style) != (
+                ("CASH", "EUROPEAN")
+                if self.underlying_type == "INDEX"
+                else ("PHYSICAL", "AMERICAN")
+            ):
+                raise ValueError("unsupported option settlement/exercise combination")
             if self.quantity_unit != "CONTRACTS" or any(
                 x is None for x in (self.underlying, self.expiry, self.right, self.strike)
             ):

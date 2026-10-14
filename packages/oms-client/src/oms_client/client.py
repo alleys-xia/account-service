@@ -37,10 +37,14 @@ class OmsClient:
         nats_url="nats://127.0.0.1:4222",
         password,
         rpc_timeout=5,
+        expected_mode="SIMULATION",
     ):
         self.identity = dict(
             strategy_instance_id=strategy, account_id=account_id, environment=environment
         )
+        if expected_mode not in {"SIMULATION", "IB_PAPER"}:
+            raise ValueError("unsupported execution domain")
+        self.expected_mode = expected_mode
         self.run_id = run_id or uid()
         RpcRequest(**self.identity, operation="acquire", run_id=self.run_id)
         if environment != "paper":
@@ -106,7 +110,8 @@ class OmsClient:
             )
             self.js = self.nc.jetstream(timeout=self.timeout)
             result = await self.rpc("acquire", run_id=self.run_id)
-            if result["mode"] != "SIMULATION" or result["trade_ready"]:
+            self.session, self.feed_epoch = result["session"], result["feed_epoch"]
+            if result["mode"] != self.expected_mode or result["trade_ready"]:
                 raise ProtocolError("UNSUPPORTED_EXECUTION_DOMAIN")
             self.session, self.feed_epoch = result["session"], result["feed_epoch"]
             self.subscription = await self.js.pull_subscribe_bind(

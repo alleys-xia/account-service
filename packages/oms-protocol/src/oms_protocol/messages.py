@@ -64,7 +64,7 @@ class RiskRequest(Scoped):
     intent_hash: str = Field(min_length=1, max_length=64)
     required_account_seq: int = Field(ge=0)
     operation: Literal["submit", "replace"]
-    mode: Literal["SIMULATION"] = "SIMULATION"
+    mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
 
 
 class RiskDecision(Scoped):
@@ -80,7 +80,7 @@ class RiskDecision(Scoped):
     valid_until: AwareDatetime
     applied_account_seq: int = Field(ge=0)
     reason: str = Field(default="", max_length=1024)
-    mode: Literal["SIMULATION"] = "SIMULATION"
+    mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
 
     @model_validator(mode="after")
     def approval_fields(self):
@@ -92,6 +92,7 @@ class RiskDecision(Scoped):
 
 
 class ExecutionCommand(Scoped):
+    feed_epoch: Token | None = None
     command_id: Identifier
     client_command_id: Identifier
     order_id: Identifier
@@ -103,7 +104,27 @@ class ExecutionCommand(Scoped):
     reservation_id: Identifier | None = None
     valid_until: AwareDatetime
     session_epoch: int = Field(ge=1)
-    mode: Literal["SIMULATION"] = "SIMULATION"
+    mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
+
+    @model_validator(mode="after")
+    def dispatch_identity(self):
+        if self.mode == "IB_PAPER" and (
+            self.feed_epoch is None or (self.operation != "cancel" and self.reservation_id is None)
+        ):
+            raise ValueError("IB paper execution requires feed epoch and approval reservation")
+        return self
+
+
+class ExecutionRpcRequest(Scoped):
+    request_id: Identifier = Field(default_factory=uid)
+    operation: Literal["head", "authorize"]
+    command: ExecutionCommand | None = None
+
+    @model_validator(mode="after")
+    def authorization_fields(self):
+        if (self.operation == "authorize") != (self.command is not None):
+            raise ValueError("authorize requires command; head does not")
+        return self
 
 
 class ExecutionReport(Scoped):
@@ -134,7 +155,7 @@ class ExecutionReport(Scoped):
     fee_revision: int | None = Field(default=None, ge=1)
     reason: str = Field(default="", max_length=1024)
     occurred_at: AwareDatetime = Field(default_factory=utcnow)
-    mode: Literal["SIMULATION"] = "SIMULATION"
+    mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
 
     @model_validator(mode="after")
     def fill_fields(self):

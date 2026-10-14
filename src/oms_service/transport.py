@@ -18,6 +18,7 @@ from oms_protocol.account import AccountRpcRequest
 from oms_protocol.common import digest, encode
 from oms_protocol.messages import (
     ExecutionReport,
+    ExecutionRpcRequest,
     OrderCommand,
     ProtocolError,
     RiskDecision,
@@ -149,6 +150,16 @@ class Transport:
             await subscription.unsubscribe()  # Provision only; the strategy owns consumption.
         subscription = await self.consumer("risk_checks", f"{prefix}.cmd.risk.{account}.check")
         await subscription.unsubscribe()
+        subscription = await self.consumer(
+            "execution_commands", f"{prefix}.cmd.exec.{account}.order"
+        )
+        await subscription.unsubscribe()
+        await self.nc.subscribe(
+            f"{prefix}.rpc.oms-exec.{account}",
+            cb=self.execution_rpc,
+            pending_msgs_limit=64,
+            pending_bytes_limit=1048576,
+        )
         await self.nc.subscribe(
             f"{prefix}.rpc.oms-risk.{account}",
             cb=self.account_rpc,
@@ -229,12 +240,18 @@ class Transport:
             await message.respond(response.model_dump_json().encode())
 
     async def account_rpc(self, message):
+        await self.service_rpc(message, AccountRpcRequest, self.service.account_rpc)
+
+    async def execution_rpc(self, message):
+        await self.service_rpc(message, ExecutionRpcRequest, self.service.execution_rpc)
+
+    async def service_rpc(self, message, model, handler):
         request_id = "invalid"
         try:
-            request = AccountRpcRequest.model_validate_json(message.data)
+            request = model.model_validate_json(message.data)
             request_id = request.request_id
             async with asyncio.timeout(self.settings.rpc_timeout):
-                result = await self.service.account_rpc(request)
+                result = await handler(request)
             response = RpcResponse(request_id=request_id, ok=True, data=result)
         except (ProtocolError, ValidationError, TimeoutError) as error:
             response = RpcResponse(

@@ -1,3 +1,5 @@
+> 0.3.0 补充：RiskRequest/Decision、ExecutionCommand/Report 的 mode 支持 SIMULATION 与 IB_PAPER。IB_PAPER 执行命令强制 feed_epoch，submit/replace 强制 reservation_id。新增 ExecutionRpcRequest(head/authorize)，subject 为 paper.v1.rpc.oms-exec.<account>，只允许 Execution 身份使用；返回当前模式、epoch 和发送授权。旧版说明中的 simulation-only 仅对应原有默认模式。
+
 # OMS v1 接口契约
 
 模型定义以 `packages/oms-protocol/src/oms_protocol/` 为准。所有金额为 Decimal / 十进制字符串，拒绝 float；时间为带时区 UTC 时间。`environment / account_id / strategy_instance_id` 都是消息隔离维度，subject 的身份必须与 payload 一致。

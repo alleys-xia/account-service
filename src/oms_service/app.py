@@ -22,6 +22,7 @@ async def run(settings):
         settings.database_url.get_secret_value(),
         environment=settings.environment,
         account_id=settings.account_id,
+        mode=settings.mode,
     )
     transport = None
     waiter = None
@@ -59,7 +60,7 @@ async def run(settings):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Durable OMS (paper / simulation domain only)")
+    parser = argparse.ArgumentParser(description="Durable OMS (paper: SIMULATION or IB_PAPER)")
     parser.add_argument("--config", default="config/oms.example.toml")
     args = parser.parse_args()
     try:

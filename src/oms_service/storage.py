@@ -14,9 +14,13 @@ from .domain import Order
 
 
 class Store:
-    def __init__(self, dsn, *, environment="paper", account_id="default", timeout=5):
+    def __init__(
+        self, dsn, *, environment="paper", account_id="default", mode="SIMULATION", timeout=5
+    ):
         self.dsn, self.timeout = dsn, timeout
-        self.header = dict(schema_version=1, environment=environment, account_id=account_id)
+        self.header = dict(
+            schema_version=1, environment=environment, account_id=account_id, mode=mode
+        )
         self.prefix = f"{environment}.v1"
         self.account_id = account_id
         self.lock = asyncio.Lock()
@@ -38,7 +42,7 @@ class Store:
             await self.db.execute(files("oms_service").joinpath("sql/001_initial.sql").read_text())
             async with self.transaction():
                 header = await self.meta("header")
-                if header and header != self.header:
+                if header and (dict(mode="SIMULATION") | header) != self.header:
                     raise ProtocolError("DATABASE_IDENTITY_OR_SCHEMA_MISMATCH")
                 await self.set_meta("header", self.header)
                 self.feed_epoch = await self.meta("feed_epoch") or uid()

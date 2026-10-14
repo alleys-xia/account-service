@@ -20,6 +20,8 @@ class Service:
             or message.environment != self.settings.environment
         ):
             raise ProtocolError("SCOPE_MISMATCH")
+        if hasattr(message, "mode") and message.mode != self.settings.mode:
+            raise ProtocolError("EXECUTION_DOMAIN_MISMATCH")
         if strategy is not None and (
             strategy not in self.settings.strategies or message.strategy_instance_id != strategy
         ):
@@ -102,6 +104,7 @@ class Service:
         )
         request = RiskRequest(
             message_id=request_id,
+            mode=self.settings.mode,
             feed_epoch=self.store.feed_epoch,
             account_id=order.account_id,
             environment=order.environment,
@@ -136,6 +139,8 @@ class Service:
     ):
         message = ExecutionCommand(
             command_id=uid(),
+            mode=self.settings.mode,
+            feed_epoch=self.store.feed_epoch,
             client_command_id=command_id,
             order_id=order.order_id,
             account_id=order.account_id,
@@ -513,7 +518,7 @@ class Service:
                 return dict(
                     session=session,
                     feed_epoch=self.store.feed_epoch,
-                    mode="SIMULATION",
+                    mode=self.settings.mode,
                     trade_ready=False,
                 )
             await self.session(strategy, request.session_token, request.session_epoch)
@@ -547,7 +552,11 @@ class Service:
                     feed_epoch=self.store.feed_epoch,
                     reconciliation_status="RECONCILIATION_REQUIRED"
                     if await self.store.meta("blocked")
-                    else "SIMULATION_ONLY",
+                    else (
+                        "SIMULATION_ONLY"
+                        if self.settings.mode == "SIMULATION"
+                        else "PORTFOLIO_UNAVAILABLE"
+                    ),
                 ).model_dump(mode="json")
             if request.operation == "events":
                 rows = await self.store.all(
@@ -581,12 +590,68 @@ class Service:
                 "SELECT count(*) AS n FROM oms.outbox WHERE NOT published"
             )
             return dict(
-                mode="SIMULATION",
+                mode=self.settings.mode,
                 trade_ready=False,
                 blocked=await self.store.meta("blocked"),
                 pending_outbox=pending["n"],
                 feed_epoch=self.store.feed_epoch,
             )
+
+    async def execution_rpc(self, request):
+        """Read-only dispatch fencing. Only Execution may call this endpoint via NATS ACL."""
+        self.scope(request)
+        async with self.store.transaction():
+            result = dict(mode=self.settings.mode, feed_epoch=self.store.feed_epoch)
+            if request.operation == "head":
+                return result
+            command = request.command
+            self.scope(command)
+            if command.feed_epoch != self.store.feed_epoch:
+                raise ProtocolError("FEED_EPOCH_MISMATCH")
+            row = await self.store.one(
+                "SELECT data FROM oms.execution_commands WHERE id=%s", (command.command_id,)
+            )
+            if not row or row["data"] != command.model_dump(mode="json"):
+                raise ProtocolError("EXECUTION_COMMAND_MISMATCH")
+            order = await self.store.order(command.order_id)
+            reason = None
+            if not order or order.strategy_instance_id != command.strategy_instance_id:
+                raise ProtocolError("EXECUTION_ORDER_MISMATCH")
+            if command.operation == "cancel":
+                # An already accepted cancel stays useful after its strategy lease expires.
+                reason = None if order.cancel_state == "REQUESTED" else "CANCEL_NOT_PENDING"
+            else:
+                row = await self.store.one(
+                    "SELECT data FROM oms.sessions WHERE strategy=%s",
+                    (command.strategy_instance_id,),
+                )
+                session = row["data"] if row else {}
+                if await self.store.meta("blocked"):
+                    reason = "ACCOUNT_RECONCILIATION_REQUIRED"
+                elif command.valid_until <= utcnow():
+                    reason = "APPROVAL_EXPIRED"
+                elif (
+                    session.get("epoch") != command.session_epoch
+                    or datetime.fromisoformat(
+                        session.get("expires_at", "1970-01-01T00:00:00+00:00")
+                    )
+                    <= utcnow()
+                ):
+                    reason = "SESSION_EXPIRED_OR_FENCED"
+                elif order.status in TERMINAL or order.cancel_state in {"REQUESTED", "CONFIRMED"}:
+                    reason = "ORDER_NOT_DISPATCHABLE"
+                elif command.operation == "submit" and (
+                    order.intent_revision != command.order_revision
+                    or order.dispatch_certainty != "PREPARED"
+                ):
+                    reason = "SUBMIT_NOT_PENDING"
+                elif command.operation == "replace" and (
+                    not order.pending
+                    or order.pending.get("execution_command_id") != command.command_id
+                    or order.pending.get("stage") != "EXECUTION_PENDING"
+                ):
+                    reason = "REPLACE_NOT_PENDING"
+            return result | dict(authorized=reason is None, reason=reason)
 
     async def account_rpc(self, request):
         """NATS ACL restricts this account-wide endpoint to Risk/operators, never strategies."""
@@ -623,6 +688,6 @@ class Service:
                 account_seq=head,
                 events=events,
                 blocked=await self.store.meta("blocked"),
-                mode="SIMULATION",
+                mode=self.settings.mode,
                 trade_ready=False,
             )

@@ -2,7 +2,7 @@
 
 第三个独立业务仓库。OMS 负责订单接收、状态、成交记录、幂等、回报路由与恢复；策略通过本仓库的协议和 SDK 调用，不直接接触执行通道。
 
-当前版本 **0.2.0**，适用于本机 Python 3.11、PostgreSQL 16 和 NATS JetStream。服务只允许 `paper / SIMULATION`，`trade_ready` 始终为 `false`。独立 Risk 已接入模拟域；Execution、IB Gateway 和 Docker 留在后续模块实施。
+当前版本 **0.3.0**，适用于本机 Python 3.11、PostgreSQL 16 和 NATS JetStream。支持 `paper / SIMULATION` 与显式 `paper / IB_PAPER`；独立 Execution 已通过 IB Gateway 模拟下单联调。`trade_ready=false` 表示全账户持仓/实盘准备度未开放，并不禁止 IB_PAPER 发单。Docker 后续实施。
 
 ## 已实现
 
@@ -58,11 +58,11 @@ source .env
 .venv/bin/oms --config config/oms.example.toml
 ```
 
-启动顺序：PostgreSQL → NATS → 行情网关与 OMS → Risk → 后续 Execution → 各策略。没有 Risk 时，新单等待风控，决策期限到达后过期；OMS 不自行批准风险。
+启动顺序：PostgreSQL → NATS → 行情网关与 OMS → Risk → Execution → 各策略。没有 Risk 时，新单等待风控，决策期限到达后过期；OMS 不自行批准风险。
 
 ## 策略接入
 
-先在 `strategies` 中执行 Python 3.11 的 `scripts/bootstrap.py`，安装 OMS 协议、SDK 以及 API / Runtime **0.3.1**。现有 `observe`、`mock` 模式仍保留。
+先在 `strategies` 中执行 Python 3.11 的 `scripts/bootstrap.py`，安装 OMS 协议、SDK 以及 API / Runtime **0.4.0**。现有 `observe`、`mock` 模式仍保留。
 
 实例配置：
 
@@ -92,3 +92,5 @@ password_env = "STRATEGY_OMS_PASSWORD"
 [模块设计与架构图](docs/design.md) · [接口契约](docs/interfaces.md) · [运行与恢复](docs/operations.md) · [验证记录及边界](docs/acceptance.md)
 
 0.2 更新新增带 epoch 的 RiskRequest、专属账户回放 RPC 和 Risk durable。旧 Mock 环境切换请先阅读 [Risk 迁移说明](../risk/docs/operations.md)，不直接混用旧待审消息。
+
+0.3 更新：新增 IB_PAPER 域、库身份绑定、SPX 指数期权元数据、Execution feed_epoch 与发送前授权 RPC。接入配置见 [Execution 运行文档](../execution/README.md)。SIMULATION 旧库可兼容读取，但不能改成 IB_PAPER；请使用独立 paperib 别名、数据库与消息存储。

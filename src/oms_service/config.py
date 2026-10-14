@@ -12,7 +12,7 @@ from pydantic import Field, SecretStr, model_validator
 class Settings(FrozenModel):
     environment: Literal["paper"] = "paper"
     account_id: Token = "default"
-    mode: Literal["SIMULATION"] = "SIMULATION"
+    mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
     database_url: SecretStr = SecretStr("postgresql://localhost/oms_dev")
     nats_url: str = "nats://127.0.0.1:4222"
     nats_user: Token = "oms"

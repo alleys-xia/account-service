@@ -1,96 +1,65 @@
-# OMS 订单管理
+# Account Service
 
-第三个独立业务仓库。OMS 负责订单接收、状态、成交记录、幂等、回报路由与恢复；策略通过本仓库的协议和 SDK 调用，不直接接触执行通道。
+**OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.1.0**，订单协议／客户端沿用 **0.3.0**，Portfolio 客户端 **0.1.0**。
 
-当前版本 **0.3.0**，适用于本机 Python 3.11、PostgreSQL 16 和 NATS JetStream。支持 `paper / SIMULATION` 与显式 `paper / IB_PAPER`；独立 Execution 已通过 IB Gateway 模拟下单联调。`trade_ready=false` 表示全账户持仓/实盘准备度未开放，并不禁止 IB_PAPER 发单。Docker 后续实施。
-
-## 已实现
-
-- 股票、单腿期权、开仓 bear call / bull put 两腿信用价差的整股／整张限价委托。两腿属于一个逻辑订单，成交按腿单独记账。
-- 新单、撤单、仅修改限价的改单；改单须带当前订单视图版本并重新通过风控。
-- 命令去重、执行回报去重、部分成交、撤成竞争、成交更正、手续费更新、异常隔离。
-- PostgreSQL 事务性 inbox / 订单状态 / journal / outbox；单账户单写入进程。
-- JetStream 持久化收发；策略会话独占、租约续期、身份隔离、按策略回放与恢复。
-- 策略框架的 `execution_mode = "oms"` 接入。行情 SDK 的归属保持在行情网关仓库。
-
-## 仓库边界
+适用于单账户、个人自用、秒级／分钟级策略。本机先运行；Linux Docker 后续实施。行情网关、Execution 和每个策略实例仍是独立进程。整个系统的业务进程数是 **3 + 策略实例数**，另有 NATS、PostgreSQL、Futu OpenD 和 IB Gateway。
 
 ```text
-tradingSystem/
-├── market-data-gateway/       # 独立 Git；含行情协议和 SDK
-├── strategies/                # 独立 Git；模板、运行器、实际策略
-└── oms/                       # 本仓库，独立 Git
-    ├── src/oms_service/       # 服务、状态机、数据库和消息传输
-    ├── packages/oms-protocol/ # 订单及 Risk / Execution 消息模型
-    ├── packages/oms-client/   # 策略使用的 OMS 客户端
-    ├── config/               # 无密钥示例配置与 NATS 权限
-    ├── scripts/              # 安装和本机配置初始化
-    └── docs/                 # 设计、接口、运行与验证记录
+account-service/
+├── src/account_runtime/        统一生命周期与配置一致性校验
+├── src/oms_service/            订单状态机、会话、持久命令与回报
+├── src/risk_service/           账户／策略规则、额度预占、审批
+├── src/portfolio_service/      策略持仓、成本、损益和券商数量对账
+├── packages/oms-protocol/      订单与账户事件协议
+├── packages/oms-client/        策略订单 SDK
+├── packages/portfolio-client/  只读持仓 SDK 和券商快照协议
+├── config/                    SIMULATION／IB_PAPER 配置与 NATS ACL
+├── scripts/                   安装与私有凭据初始化
+└── docs/                      设计、运行与验收
 ```
 
-协议和 SDK 是这个仓库发布的两个 Python 包，不是两个额外 Git 仓库。策略仓库的 `strategy_api.orders` 保留兼容导入，内部直接引用 `oms_protocol.orders`，没有两套订单模型。
+这些 `packages/` 都属于本仓库，用固定版本 wheel 提供给策略和 Execution，**不另建共享包仓库**。策略无需安装账户服务、IB 或 PostgreSQL 驱动。
 
-## 本机安装与启动
+## 安装与启动
 
-以下命令在 `oms` 目录执行，需要 Python **3.11** 和 `uv`。系统默认 `python3` 如果是旧版本，请明确使用 `python3.11`。
-
-```bash
-python3.11 scripts/bootstrap.py
-python3.11 scripts/init_local.py
-createdb oms_dev
-```
-
-`createdb` 仅用于首次建立专用空库，已经存在时跳过。OMS 自动安装自己的 `oms` schema，拒绝复用身份或版本不匹配的库。`.env` 以 0600 权限创建，重复初始化不会覆盖。
-
-行情与订单可以共用一个 NATS 服务。`config/nats.dev.conf` 提供 gateway、oms、risk、alpha、beta 的组合权限。该配置替代单独行情版 NATS 配置；不要在同一个端口同时启动两个服务。启动前加载三个仓库的私有配置：
+需要 Python 3.11、uv、PostgreSQL 和 NATS JetStream。与 `market-data-gateway`、`execution`、`strategies` 平级放置：
 
 ```bash
-source ../market-data-gateway/.env
+cd account-service
+python3 scripts/bootstrap.py
+python3 scripts/init_local.py
+# 已有 .env 不会被覆盖；按 .env.example 补齐缺少的密码。
+set -a
 source .env
-source ../risk/.env
-../market-data-gateway/data/tools/nats-server-v2.15.1-darwin-arm64/nats-server -c config/nats.dev.conf
+set +a
 ```
 
-如使用系统安装的 NATS，可替换二进制路径。持久化目录相对于 NATS 启动目录；迁移已有实例时应保留原存储目录。另开终端启动 OMS：
+安装后以 `python3 scripts/bootstrap.py --locked` 验证锁文件。先准备各模块数据库和 NATS，再启动账户进程。IB 模拟环境示例：
 
 ```bash
-source .env
-.venv/bin/oms --config config/oms.example.toml
+# 仅首次执行；有同名数据库时不要重建。
+createdb oms_ib_paper
+createdb risk_ib_paper
+createdb portfolio_paper
+
+# 独立终端启动；从 account-service/ 执行并加载相同 .env。
+../market-data-gateway/data/tools/nats-server-v2.15.1-darwin-arm64/nats-server -c config/nats.paper.conf
+
+# 一个终端即启动三个模块。
+.venv/bin/account-runtime --oms config/oms.paper.toml --risk config/risk.paper.toml --portfolio config/portfolio.paper.toml
 ```
 
-启动顺序：PostgreSQL → NATS → 行情网关与 OMS → Risk → Execution → 各策略。没有 Risk 时，新单等待风控，决策期限到达后过期；OMS 不自行批准风险。
+再启动独立 [Execution](../execution/README.md)。两侧 NATS 密码必须一致。策略与 OMS、Portfolio 的账户别名／执行模式也必须一致。SIMULATION 使用默认三份 `*.example.toml`，对应 `oms_dev`、`risk_dev`、`portfolio_dev`；没有券商快照提供者时 Portfolio 如实显示来源不可用。
 
-## 策略接入
+## Portfolio 首期能力
 
-先在 `strategies` 中执行 Python 3.11 的 `scripts/bootstrap.py`，安装 OMS 协议、SDK 以及 API / Runtime **0.4.0**。现有 `observe`、`mock` 模式仍保留。
+- 从 OMS 持久账户事件按序回放，每个策略、每个合约独立记账；重复事件幂等，冲突或序列缺口冻结。
+- 逐腿成交、撤销／更正成交、版本化手续费；移动加权平均成本、已实现损益、交易现金流。现金流不等于账户余额；未实现盈亏暂不估算。
+- Execution 只读查询新鲜 IB 持仓和资金摘要，Portfolio 检查采集窗口和账本水位。已有或无法解释的仓位保留为**外部／未分配**，不自动分配策略。
+- 策略通过 `ctx.portfolio.snapshot()` 查询，通过 `on_recover` 和 `on_position_update` 获取完整视图；NATS ACL 限制其只能读取自身持仓。
 
-实例配置：
+`POSITIONS_MATCHED` 只表示持仓数量匹配，不代表资金、保证金和税务对账完成。IB_PAPER 示例启用 `require_portfolio=true`：存在外部差异、快照过期或来源不可用时拒绝新增风险。仍不自动释放已有风险预占，也未开放平仓、单腿卖出、自动差异修复、行权／指派处理或实盘。
 
-```toml
-strategy_id = "my-strategy"
-strategy_instance_id = "alpha"
-environment = "paper"
-execution_mode = "oms"
-account_alias = "default"
-state_root = ".state-oms"
+同进程提供模块与数据所有权边界，共享内存和故障范围；任一核心模块不可恢复故障会使整个账户进程退出。保留 `oms`、`risk`、`portfolio` 单模块入口用于排障，同一数据库不要与统一入口同时启动。
 
-[market]
-nats_url = "nats://127.0.0.1:4222"
-password_env = "STRATEGY_NATS_PASSWORD"
-
-[oms]
-nats_url = "nats://127.0.0.1:4222"
-password_env = "STRATEGY_OMS_PASSWORD"
-```
-
-组合 NATS 配置使用同一策略身份：alpha 的两个密码环境变量均取 `MD_ALPHA_PASSWORD`，beta 同理。不要把密码写进实例 TOML 或 Git。
-
-使用原有 `ctx.orders.submit/cancel/replace/snapshot`，通过 `on_order_update` 和 `on_execution` 接收回报。`CommandHandle` 仅代表本地待提交命令，SDK 的 PubAck 仅代表消息已持久化；订单是否受理或成交，以后续 OMS 回报为准。
-
-添加策略时同步配置 NATS 的专属 subject / durable 权限和 OMS 的 `strategies` 列表，再启动独立实例。切换 observe/mock/oms 时采用新的状态目录，不能直接混用旧 SQLite 状态。
-
-[模块设计与架构图](docs/design.md) · [接口契约](docs/interfaces.md) · [运行与恢复](docs/operations.md) · [验证记录及边界](docs/acceptance.md)
-
-0.2 更新新增带 epoch 的 RiskRequest、专属账户回放 RPC 和 Risk durable。旧 Mock 环境切换请先阅读 [Risk 迁移说明](../risk/docs/operations.md)，不直接混用旧待审消息。
-
-0.3 更新：新增 IB_PAPER 域、库身份绑定、SPX 指数期权元数据、Execution feed_epoch 与发送前授权 RPC。接入配置见 [Execution 运行文档](../execution/README.md)。SIMULATION 旧库可兼容读取，但不能改成 IB_PAPER；请使用独立 paperib 别名、数据库与消息存储。
+[当前架构](docs/portfolio-design.md) · [运行与迁移](docs/operations.md) · [本轮验收](docs/portfolio-acceptance.md) · [订单接口](docs/interfaces.md) · [Risk 规则设计](docs/risk/design.md)

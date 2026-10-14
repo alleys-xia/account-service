@@ -58,3 +58,9 @@ ExecutionCommand 的稳定 `command_id` 是未来执行器的幂等键。执行�
 ## Risk 账户回放（0.2）
 
 `paper.v1.rpc.oms-risk.default` 使用 `oms_protocol.account.AccountRpcRequest`，只允许 Risk 身份访问。head 返回 feed_epoch/account_seq/blocked；events 提交 feed_epoch/after_seq/limit（1–500），返回带 epoch 和连续 account_seq 的 AccountEvent，单页约 512 KiB 上限。游标超前或 epoch 不符明确拒绝，策略账号不能读取账户全量事件。Risk 在审批前追平 required_account_seq。订单 view 新增 pending_request_id 用于精确关联，pending_stage 区分待风控与待执行改单，供 Risk 核验对应版本预占是否存在；Risk 拒绝原因以 `RISK_REJECTED:<code>` 回给策略。
+
+## Portfolio 与统一账户进程补充（2026-10-14）
+
+OMS/Risk/Portfolio 同仓库同进程，保留本页既有协议。新增 `paper.v1.rpc.oms-portfolio.<account>`，使用 `AccountRpcRequest` 的 head/events 接口，只供 Portfolio 回放账户 journal。
+
+`paper.v1.rpc.exec.<account>.account` 提供 `portfolio_client.models.BrokerSnapshot`；`paper.v1.rpc.portfolio.<account>.account` 供 Risk/operator 获取账户视图，`paper.v1.rpc.portfolio.<account>.strategy.<strategy>` 供对应策略查询 ViewSnapshot。请求统一为 `portfolio_client.models.Request`，回复包裹 RpcResponse 并校验 request_id。详细状态、新鲜度和权限边界见 [运行手册](operations.md)。

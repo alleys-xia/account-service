@@ -1,0 +1,17 @@
+require_portfolio = true
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+database_url = "postgresql://localhost/risk_ib_paper"
+nats_url = "nats://127.0.0.1:4223"
+[account]
+max_order_cost = "1000"
+max_committed = "2000"
+max_option_quantity = 1
+[strategies.alpha]
+max_order_cost = "1000"
+max_committed = "2000"
+max_option_quantity = 1
+[instruments.AAPL]
+asset_type = "STOCK"
+multiplier = "1"

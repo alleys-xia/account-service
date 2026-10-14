@@ -1,0 +1,67 @@
+# Simulation limits only; operator must supply real instrument catalog before any future live use.
+environment = "paper"
+account_id = "default"
+mode = "SIMULATION"
+nats_url = "nats://127.0.0.1:4222"
+poll_interval = 0.5
+approval_seconds = 5
+max_decision_age = 30
+min_option_dte = 2
+fee_buffer_per_unit_per_leg = "1"
+# Add installed operator-controlled rules as "your_package.rules:YourRule".
+extra_rules = []
+
+[account]
+max_order_cost = "5000"
+max_committed = "10000"
+max_open_orders = 20
+max_requests_per_minute = 60
+halted = false
+
+[strategies.alpha]
+max_order_cost = "3000"
+max_committed = "5000"
+max_option_quantity = 5
+
+[strategies.beta]
+max_order_cost = "3000"
+max_committed = "5000"
+max_option_quantity = 5
+
+# These IDs are explicit simulation catalog entries, NOT qualified broker contracts.
+# Real gateway instrument IDs/versions must be copied and independently verified here.
+[instruments.SIM_AAPL]
+asset_type = "STOCK"
+multiplier = "1"
+
+[instruments.SIM_AAPL_CALL_100]
+asset_type = "OPTION"
+multiplier = "100"
+underlying = "AAPL"
+expiry = "2030-01-18"
+right = "CALL"
+strike = "100"
+
+[instruments.SIM_AAPL_CALL_105]
+asset_type = "OPTION"
+multiplier = "100"
+underlying = "AAPL"
+expiry = "2030-01-18"
+right = "CALL"
+strike = "105"
+
+[instruments.SIM_AAPL_PUT_100]
+asset_type = "OPTION"
+multiplier = "100"
+underlying = "AAPL"
+expiry = "2030-01-18"
+right = "PUT"
+strike = "100"
+
+[instruments.SIM_AAPL_PUT_95]
+asset_type = "OPTION"
+multiplier = "100"
+underlying = "AAPL"
+expiry = "2030-01-18"
+right = "PUT"
+strike = "95"

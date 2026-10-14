@@ -3,6 +3,37 @@ revision = 3
 requires-python = "==3.11.*"
 
 [[package]]
+name = "account-service"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "nats-py" },
+    { name = "oms-client" },
+    { name = "oms-protocol" },
+    { name = "portfolio-client" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nats-py", specifier = ">=2.10,<3" },
+    { name = "oms-client", path = ".cache/wheels/oms_client-0.3.0-py3-none-any.whl" },
+    { name = "oms-protocol", path = ".cache/wheels/oms_protocol-0.3.0-py3-none-any.whl" },
+    { name = "portfolio-client", path = ".cache/wheels/portfolio_client-0.1.0-py3-none-any.whl" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "pydantic", specifier = ">=2.11,<3" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.12,<1" }]
+
+[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -53,33 +84,24 @@ wheels = [
 requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
 
 [[package]]
-name = "oms-service"
-version = "0.3.0"
-source = { editable = "." }
+name = "portfolio-client"
+version = "0.1.0"
+source = { path = ".cache/wheels/portfolio_client-0.1.0-py3-none-any.whl" }
 dependencies = [
     { name = "nats-py" },
-    { name = "oms-client" },
     { name = "oms-protocol" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
 ]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ruff" },
+wheels = [
+    { filename = "portfolio_client-0.1.0-py3-none-any.whl", hash = "sha256:0edcede7cf31355c80fd8e77a8cdda8524d578c1aaeb0e786915b5bdc745a52c" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
-    { name = "oms-client", path = ".cache/wheels/oms_client-0.3.0-py3-none-any.whl" },
-    { name = "oms-protocol", path = ".cache/wheels/oms_protocol-0.3.0-py3-none-any.whl" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
+    { name = "oms-protocol", specifier = "==0.3.0" },
     { name = "pydantic", specifier = ">=2.11,<3" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.12,<1" }]
 
 [[package]]
 name = "psycopg"

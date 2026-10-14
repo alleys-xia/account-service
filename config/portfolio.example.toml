@@ -1,0 +1,10 @@
+environment = "paper"
+mode = "SIMULATION"
+account_id = "default"
+strategies = ["alpha", "beta"]
+catalog_file = "risk.example.toml"
+database_url = "postgresql://localhost/portfolio_dev"
+nats_url = "nats://127.0.0.1:4222"
+broker_interval = 30
+max_snapshot_age = 90
+# PORTFOLIO_NATS_PASSWORD supplied through environment.

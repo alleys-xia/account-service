@@ -1,0 +1,6 @@
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+database_url = "postgresql://localhost/oms_ib_paper"
+nats_url = "nats://127.0.0.1:4223"
+strategies = ["alpha"]

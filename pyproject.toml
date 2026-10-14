@@ -2,17 +2,21 @@
 requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 [project]
-name = "oms-service"
-version = "0.3.0"
+name = "account-service"
+version = "0.1.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["oms-protocol==0.3.0", "oms-client==0.3.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
+dependencies = ["portfolio-client==0.1.0", "oms-protocol==0.3.0", "oms-client==0.3.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
 [project.scripts]
+account-runtime = "account_runtime.app:main"
+risk = "risk_service.app:main"
+portfolio = "portfolio_service.app:main"
 oms = "oms_service.app:main"
 [tool.hatch.build.targets.wheel]
-packages = ["src/oms_service"]
+packages = ["src/account_runtime", "src/oms_service", "src/risk_service", "src/portfolio_service"]
 [dependency-groups]
 dev = ["ruff>=0.12,<1"]
 [tool.uv.sources]
+portfolio-client = { path = ".cache/wheels/portfolio_client-0.1.0-py3-none-any.whl" }
 oms-protocol = { path = ".cache/wheels/oms_protocol-0.3.0-py3-none-any.whl" }
 oms-client = { path = ".cache/wheels/oms_client-0.3.0-py3-none-any.whl" }
 [tool.ruff]

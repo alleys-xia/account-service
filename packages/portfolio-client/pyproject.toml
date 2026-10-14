@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+[project]
+name = "portfolio-client"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = ["pydantic>=2.11,<3", "nats-py>=2.10,<3", "oms-protocol==0.3.0"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/portfolio_client"]

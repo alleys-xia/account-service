@@ -1,3 +1,5 @@
+> 本文保留 OMS 模块历史设计／验收。当前 OMS、Risk、Portfolio 已同仓库同进程，运行以 [账户手册](operations.md) 为准，Portfolio 新增能力见 [当前设计](portfolio-design.md)。
+
 # OMS v0.1 验证记录
 
 日期：2026-10-14。本轮范围为本机独立进程、持久化 OMS、策略接入与协议验证，不包含真实券商执行。
@@ -41,4 +43,4 @@
 
 ## 0.2 Risk 接入补充（2026-10-14）
 
-以上为 0.1 历史验收记录。0.2 已实现独立 Risk 账户回放、请求 epoch、审批原因传递和消息权限，对接 Risk v0.1 真实进程；Execution 仍为临时模拟。见 [Risk 当前验证记录](../../risk/docs/acceptance.md)。
+以上为 0.1 历史验收记录。0.2 已实现独立 Risk 账户回放、请求 epoch、审批原因传递和消息权限，对接 Risk v0.1 真实进程；Execution 仍为临时模拟。见 [Risk 当前验证记录](risk/acceptance.md)。

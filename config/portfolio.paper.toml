@@ -1,0 +1,10 @@
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+strategies = ["alpha"]
+catalog_file = "risk.paper.toml"
+database_url = "postgresql://localhost/portfolio_paper"
+nats_url = "nats://127.0.0.1:4223"
+broker_interval = 30
+max_snapshot_age = 90
+# PORTFOLIO_NATS_PASSWORD supplied through environment.

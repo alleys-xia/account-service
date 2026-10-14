@@ -1,44 +1,37 @@
-> 当前 0.3.0 新增 IB_PAPER。旧无 mode header 仅按 SIMULATION 兼容，不能将旧库切为 IB 发单。IB 模拟账户使用独立 paperib 别名/数据库/消息存储；配置见 ../../execution/README.md。原模拟模式运行方式保持不变。
+# 账户进程运行与迁移
 
-# 运行与恢复
+## 仓库迁移
 
-## 单机进程
+原 `oms/` 重命名为 `account-service/`，保留其 Git 历史；Risk 源码移入 `src/risk_service/`。原 Risk 完整工作目录和迁移前 Git bundle 保存在父目录 `.migration-backups/2026-10-14-account-service/`，属于本机恢复备份，不上传。Portfolio 直接加入同仓库，不再单建 repo。
 
-OMS 使用 PostgreSQL 会话级 advisory lock 保证一个数据库只有一个活动写入者。数据库身份（schema_version、environment、account_id）及 feed_epoch 持久化。数据库连接不可用或后台关键任务失败时进程退出；不自动换连接继续发送。每个账户使用独立数据库和 stream。
+原 OMS/Risk 数据库没有搬迁或删除，原私有 `.env` 没有覆盖。风险配置和数据库仍须选择同一账户、环境、模式；不能把 `SIMULATION` 数据作为 `IB_PAPER` 使用。原工作目录中的启动路径、旧 venv 脚本须切换到新目录并重新 bootstrap。Execution、Strategies 的安装脚本已改为从 `account-service/packages/` 构建依赖。
 
-PostgreSQL 的 inbox、订单聚合、journal、outbox 在一个事务中更新。消息只有在提交后才确认。outbox 收到 JetStream PubAck 后才标记 published；失去确认时沿用原消息 ID 重发。服务故障之后可重启同一配置，禁止通过清空库或换 feed_epoch 来“恢复”。
+共享协议 Python 导入名保持 `oms_protocol`、`oms_client`；消费者不需要导入服务代码。Portfolio 增加 `portfolio_client`，仍属于账户仓库。这里没有新建共享 Git 仓库。
 
-NATS 使用文件持久化、LimitsPolicy、DiscardNew、无自动过期，默认容量 128 MiB。达到上限时拒绝新写入，OMS outbox 保留未完成发送并重试；outbox 达阈值后，新单／改单持久化为 `OMS_BUSY` 拒绝并确认输入消息，仍继续处理撤单和回报；阈值是准入压力线，拒绝回报仍可能使 outbox 增长。该取舍避免自动丢弃未处理订单，但需要监控容量；**当前未提供在线归档／安全截断工具**。提高容量前先停止 OMS、用管理身份扩容 stream 并同步配置，然后重启。不能删除 stream、consumer 或 PostgreSQL 历史来释放空间。
+已有 IB_PAPER NATS 数据目录可能位于旧 `execution/data/nats-paper/`。升级时先停止原进程，为新的 NATS 配置创建私有 `config/local.nats.conf` 并将 `store_dir` 指向原目录的绝对路径（或离线完整迁移后保持同一数据），不要带着原业务数据库启动一个空的 JetStream。原 `default / SIMULATION` 与 `paperib / IB_PAPER` 也不得混用存储。
 
-OMS 的三个可靠入口 consumer 采用 `max_ack_pending=1`，防止接收后提交前崩溃使后续费用／更正先于原成交处理；策略 consumer 保持独立，允许 32 个未确认消息。现有 stream / consumer 的关键配置不匹配时拒绝启动，不静默改写。早期开发实例如果仍使用旧的 32 槽 OMS 入口，先停止服务并用管理身份修改 consumer 配置，保留 consumer 的确认位置，不删除重建。单节点开发配置不提供主机故障级高可用；Linux Docker 阶段需要持久卷、备份、资源和进程重启策略。
+## 配置与顺序
 
-## 会话与健康
+首次照 README 安装并创建模块独立数据库。统一入口检查账户／环境／执行模式、NATS 地址、策略名单、Risk/Portfolio 合约版本与乘数一致；每个 Store 再校验数据库身份和单写锁。生产化时给三个数据库配置不同 PostgreSQL 角色；本机使用同一个管理员角色不构成访问隔离。
 
-一个 strategy_instance_id 同时只有一个运行会话。默认租约 30 秒，SDK 周期续期；正常退出主动释放。进程崩溃后，新实例需等待旧租约到期；启动报 STRATEGY_ALREADY_ACTIVE 时按租约窗口退避重启，不要复用旧 token。
+启动顺序：PostgreSQL → NATS → account-runtime → Execution → 策略。Portfolio 在 Execution 尚未上线时返回来源不可用；Risk 的 IB_PAPER 示例因此拒绝新风险，待新鲜对账匹配后恢复审批资格。不会因为账户进程已启动就宣布可以交易。
 
-行情不可用时不准新增风险动作；已启动且 OMS 会话有效的策略仍能在合法串行回调中请求撤单。停止／初始化／恢复期间不产生新动作。订单端连接丢失需要重启实例，恢复 journal 后才重新开放决策。
+- `config/nats.paper.conf` 是 IB_PAPER ACL 的唯一维护源，账户别名 `paperib`，默认端口 4223。
+- `config/nats.dev.conf` 是共用网关的 SIMULATION 模板，使用网关的 `MD_*` 凭据，账户别名 `default`。加载网关和本仓库私有 `.env`；开发模式不内置模拟执行器或虚构券商快照。
+- `portfolio.*.toml` 的 `catalog_file` 读取同一份 Risk 合约目录；Execution 仍独立核验 instrument_id、版本、conId、乘数和合约资格。
+- 三模块数据库 DSN 可由 `OMS_DATABASE_URL`、`RISK_DATABASE_URL`、`PORTFOLIO_DATABASE_URL` 覆盖。切换配置前检查终端中旧环境变量，环境变量优先于 TOML。
+- 新策略同步登记 OMS/Portfolio 策略名单、Risk 限额、NATS 账户服务 ACL；行情服务还需自身 ACL。策略只获自己的 Portfolio subject 权限。
 
-`trade_ready=false` 是本版本固定边界。策略状态中的 `oms_ready` 表示连接及租约可用，`simulation_ready` 表示本地模拟域可提交决策，不代表真实券商可交易或风控批准。订单是否进入执行端，以回报为准。Positions / Portfolio 接口仍返回 UNAVAILABLE。
+## 快照与故障
 
-通过 OMS SDK 的 `rpc("health")` 可检查 blocked、pending_outbox、feed_epoch。策略状态可使用原有 `strategy-runner status` 查看。以下只读 SQL 用于本机排查：
+Portfolio 每秒追平 OMS 账户 journal；默认每 30 秒通过 Execution 请求券商快照，90 秒过期。完整快照带 `feed_epoch`、`applied_account_seq`、来源会话和采集时间。策略轮询默认每秒，把变化送入串行回调；回调可能合并多个成交，必须使用快照替换视图，不能把它当作逐笔成交再次累加。
 
-```sql
-SELECT key, value FROM oms.meta WHERE key IN ('blocked', 'account_seq', 'feed_epoch');
-SELECT count(*) FROM oms.outbox WHERE NOT published;
-SELECT strategy, count(*) FROM oms.orders GROUP BY strategy;
-SELECT channel, message_id, reason, recorded_at FROM oms.quarantine ORDER BY id DESC LIMIT 20;
-```
+账户 RPC 是 `paper.v1.rpc.portfolio.<account>.account`，只给 Risk/operator；策略 RPC 为 `paper.v1.rpc.portfolio.<account>.strategy.<strategy>`，身份来自被 ACL 授权的 subject。普通策略无法查询账户资金、其他策略或原始券商仓位。
 
-发生 UNKNOWN、原始成交 ID 冲突或非法回报时，保留原始数据并冻结账户新增风险动作。本版本没有自动清除冻结按钮；真实执行接入前需补齐券商对账和有审计记录的恢复流程。不要手动把 blocked 改空来继续下单。
+`safe_for_new_risk` 要求 OMS 回放新鲜、无冻结、最新稳定快照数量匹配；IB_PAPER Risk 再检查请求所需的账户水位。`trade_ready=false` 保留为当前非实盘边界。差异状态包括 `UNAVAILABLE`、`SOURCE_UNAVAILABLE`、`STALE`、`PENDING`、`UNMAPPED`、`EXTERNAL_OR_UNEXPLAINED`、`BLOCKED`。
 
-## 配置与升级
+已有 IB 仓位记外部／未分配。没有经过人工核对的归属迁移接口，不可通过修改数据库消除差异来恢复交易。资金摘要只是券商读数；尚无完整出入金、公司行动、行权指派账本。新增 Portfolio 不自动启用平仓或裸卖，不自动把已成交额度转换成持仓保证金。
 
-密钥放在进程环境变量，`.env` / 本地配置均不进 Git。开发 NATS 配置绑定 localhost；跨机器访问需加 TLS、网络控制和独立凭据。
+SIGTERM / Ctrl-C 关闭三个模块连接；数据库或关键后台任务不可恢复故障导致整个账户进程非零退出。退出不撤销券商现存委托，也不是跨进程原子的全局 kill switch。Execution 在 OMS 授权不可用时拒绝新的授权请求；已经发送到券商的订单仍需按执行模块恢复流程核对。重启先读原库并补事件，不能清空库规避冻结。
 
-订单数据库、策略 SQLite 和 JetStream 数据必须备份并一致恢复。单独回退一个组件可能产生 feed 水位冲突，此时停止而非跳过。协议当前 schema_version=1，未来升级以迁移脚本和兼容版本发布；禁止运行未知 schema 的程序。
-
-Risk / Execution 接入前还必须完成：合约资格与乘数、券商原始成交/费用转换、券商 ID 持久化、预占与账户对账、执行 fencing、kill switch、完整的到期/行权/指派与股票持仓事件。OMS v0.1 不接管这些职责。
-
-## Risk v0.1 接入
-
-0.2 已接入独立 Risk 模拟服务，账户/策略限额及预占由其负责；上文真实 Execution、Portfolio 和券商资格/对账要求仍未实现。切换旧 Mock 数据前先阅读 [Risk 运行与迁移](../../risk/docs/operations.md)。
+同进程中的 CPU 密集规则会阻塞共享事件循环，插件应保持短时；需要重计算时另行隔离。Docker、长时间运行、生产容量和灾备演练尚未验收。

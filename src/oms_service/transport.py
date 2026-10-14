@@ -166,6 +166,12 @@ class Transport:
             pending_msgs_limit=64,
             pending_bytes_limit=1048576,
         )
+        await self.nc.subscribe(
+            f"{prefix}.rpc.oms-portfolio.{account}",
+            cb=self.account_rpc,
+            pending_msgs_limit=64,
+            pending_bytes_limit=1048576,
+        )
         for name, subject, model, handler in (
             ("oms_commands", f"{prefix}.cmd.oms.{account}.*", OrderCommand, self.service.command),
             ("oms_risk", f"{prefix}.evt.risk.{account}.decision", RiskDecision, self.service.risk),

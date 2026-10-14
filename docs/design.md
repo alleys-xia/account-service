@@ -1,3 +1,5 @@
+> 本文保留 OMS 模块历史设计／验收。当前 OMS、Risk、Portfolio 已同仓库同进程，运行以 [账户手册](operations.md) 为准，Portfolio 新增能力见 [当前设计](portfolio-design.md)。
+
 # OMS 首期设计
 
 日期：2026-10-14。适用个人单账户、多策略独立进程；Python 3.11、NATS JetStream、PostgreSQL 16，本机优先。OMS 是第三个独立业务仓库；协议和客户端置于其 packages/，不新增公共库仓库。

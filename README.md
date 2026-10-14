@@ -1,5 +1,7 @@
 # Account Service
 
+包含oms 持仓以及风控的模块
+
 **OMS、Risk、Portfolio 同仓库、同进程**。`account-runtime` 统一启动和停止三个内部模块；模块各自拥有数据库、事务和消息身份。当前版本 **0.2.0**，订单协议／客户端 **0.4.0**，Portfolio 客户端 **0.2.0**。
 
 适用于单账户、个人自用、秒级／分钟级策略。本机先运行；Linux Docker 后续实施。行情网关、Execution 和每个策略实例仍是独立进程。整个系统的业务进程数是 **3 + 策略实例数**，另有 NATS、PostgreSQL、Futu OpenD 和 IB Gateway。

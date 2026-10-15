@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from oms_protocol.messages import ProtocolError
+from oms_protocol.orders import STOCK_SHORT_BUDGET_FACTOR
 
 from portfolio_service.ledger import amount
 
@@ -86,6 +87,18 @@ def execution(order, payload):
     buffer = max(amount(r["fee_buffer"]) for r in eligible_reservations(order))
     if sum((amount(r["fees"]) for r in records.values() if not r["superseded"]), ZERO) > buffer:
         return "FEE_BUFFER_EXCEEDED"
+    short_budgets = [
+        amount(r["stock_short_budget_per_share"])
+        for r in eligible_reservations(order)
+        if r.get("stock_short_budget_per_share") is not None
+    ]
+    if short_budgets and any(
+        not r["superseded"]
+        and amount(r["quantity"]) > 0
+        and amount(r["price"]) * STOCK_SHORT_BUDGET_FACTOR > max(short_budgets)
+        for r in records.values()
+    ):
+        return "STOCK_SHORT_BUDGET_EXCEEDED"
     return None
 
 

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 [project]
 name = "account-service"
-version = "0.4.0"
+version = "0.5.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["portfolio-client==0.4.0", "oms-protocol==0.5.0", "oms-client==0.5.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
+dependencies = ["portfolio-client==0.5.0", "oms-protocol==0.6.0", "oms-client==0.6.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
 [project.scripts]
 account-runtime = "account_runtime.app:main"
 risk = "risk_service.app:main"
@@ -16,9 +16,9 @@ packages = ["src/account_runtime", "src/oms_service", "src/risk_service", "src/p
 [dependency-groups]
 dev = ["ruff>=0.12,<1"]
 [tool.uv.sources]
-portfolio-client = { path = ".cache/wheels/portfolio_client-0.4.0-py3-none-any.whl" }
-oms-protocol = { path = ".cache/wheels/oms_protocol-0.5.0-py3-none-any.whl" }
-oms-client = { path = ".cache/wheels/oms_client-0.5.0-py3-none-any.whl" }
+portfolio-client = { path = ".cache/wheels/portfolio_client-0.5.0-py3-none-any.whl" }
+oms-protocol = { path = ".cache/wheels/oms_protocol-0.6.0-py3-none-any.whl" }
+oms-client = { path = ".cache/wheels/oms_client-0.6.0-py3-none-any.whl" }
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -30,6 +30,7 @@ class Instrument(FrozenModel):
     multiplier: Amount = Field(gt=0)
     currency: Literal["USD", "HKD"] = "USD"
     future_contract_budget: Amount | None = Field(default=None, gt=0)
+    stock_short_budget_per_share: Amount | None = Field(default=None, gt=0)
     underlying: str | None = None
     expiry: date | None = None
     right: Literal["CALL", "PUT"] | None = None
@@ -41,6 +42,8 @@ class Instrument(FrozenModel):
 
     @model_validator(mode="after")
     def valid(self):
+        if self.asset_type != "STOCK" and self.stock_short_budget_per_share is not None:
+            raise ValueError("short share budgets apply to STOCK only")
         if self.asset_type == "STOCK":
             if self.multiplier != 1 or any(
                 x is not None for x in (self.expiry, self.right, self.strike)
@@ -97,6 +100,7 @@ class Settings(FrozenModel):
     account: Limits = Field(default_factory=Limits)
     strategies: dict[Token, Limits]
     instruments: dict[Token, Instrument]
+    stock_short_allowlist: dict[Token, tuple[Token, ...]] = {}
     extra_rules: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -108,6 +112,19 @@ class Settings(FrozenModel):
             raise ValueError("fee buffers must be nonnegative")
         if not self.strategies or not self.instruments:
             raise ValueError("explicit strategy limits and instrument catalog required")
+        for strategy, names in self.stock_short_allowlist.items():
+            if strategy not in self.strategies or len(set(names)) != len(names):
+                raise ValueError("short allowlist requires a known strategy and unique instruments")
+            for name in names:
+                ref = self.instruments.get(name)
+                if (
+                    ref is None
+                    or ref.asset_type != "STOCK"
+                    or ref.stock_short_budget_per_share is None
+                ):
+                    raise ValueError(
+                        "short allowlist requires a stock catalog entry and share budget"
+                    )
         return self
 
     @property
@@ -131,6 +148,7 @@ class Settings(FrozenModel):
                     "min_future_dte",
                     "strategies",
                     "instruments",
+                    "stock_short_allowlist",
                     "extra_rules",
                     "max_decision_age",
                     "min_option_dte",

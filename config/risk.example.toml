@@ -1,4 +1,6 @@
 # Simulation limits only; operator must supply real instrument catalog before any future live use.
+stock_short_allowlist = {}
+# Stock shorts also require per-stock share budgets; see docs/stock-shorts.md.
 environment = "paper"
 account_id = "default"
 mode = "SIMULATION"

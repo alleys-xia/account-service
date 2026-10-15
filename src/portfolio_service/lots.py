@@ -33,7 +33,7 @@ def validate_close(intent, strategy, lot):
     if (
         opening.structure == "SINGLE"
         and opening.legs[0].side != "BUY"
-        and opening.legs[0].asset_type != "FUTURE"
+        and opening.legs[0].asset_type not in {"STOCK", "FUTURE"}
     ):
         raise ProtocolError("UNSUPPORTED_POSITION")
     if intent.currency != opening.currency:

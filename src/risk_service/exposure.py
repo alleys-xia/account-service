@@ -2,6 +2,8 @@
 
 from decimal import Decimal
 
+from oms_protocol.orders import STOCK_SHORT_BUDGET_FACTOR
+
 from portfolio_service.lots import units
 
 from .ledger import eligible_reservations
@@ -14,13 +16,31 @@ def active(order):
 
 
 def unit_cost(order):
-    return max(
+    reserved = max(
         [ZERO]
         + [
             Decimal(r["cost"]) / Decimal(r.get("quantity", order["view"]["intent"]["quantity"]))
             for r in eligible_reservations(order)
         ]
     )
+    short_reservations = [
+        r for r in eligible_reservations(order) if r.get("stock_short_budget_per_share") is not None
+    ]
+    if not short_reservations:
+        return reserved
+    # A sell limit is a minimum. Higher fills must increase, never reduce, the hold.
+    filled_price = max(
+        [ZERO]
+        + [
+            Decimal(r["price"])
+            for r in order["executions"].values()
+            if not r["superseded"] and Decimal(r["quantity"]) > 0
+        ]
+    )
+    fee_per_share = max(
+        Decimal(r["fee_buffer"]) / Decimal(r["quantity"]) for r in short_reservations
+    )
+    return max(reserved, STOCK_SHORT_BUDGET_FACTOR * filled_price + fee_per_share)
 
 
 def exposure(orders, lots):

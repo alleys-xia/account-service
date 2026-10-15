@@ -74,13 +74,19 @@ class Service:
                 order = await self.store.order(order_id) or empty_order()
                 issue = project(order, payload)
                 if issue:
-                    # A fee overrun is an opening halt, never a downgrade of a
+                    # Budget overruns are opening halts, never a downgrade of a
                     # journal/ownership failure that must also prohibit closing.
                     previous_block = await self.store.meta("blocked")
-                    if issue != "FEE_BUFFER_EXCEEDED" or not previous_block:
+                    if (
+                        issue not in {"FEE_BUFFER_EXCEEDED", "STOCK_SHORT_BUDGET_EXCEEDED"}
+                        or not previous_block
+                    ):
                         await self.store.set_meta("blocked", issue)
                         await self.store.set_meta(
                             "fee_close_allowed", issue == "FEE_BUFFER_EXCEEDED"
+                        )
+                        await self.store.set_meta(
+                            "short_budget_close_allowed", issue == "STOCK_SHORT_BUDGET_EXCEEDED"
                         )
                 await self.store.save_order(order_id, order)
                 # Catch cross-order corrections that would over-close a position.
@@ -164,10 +170,15 @@ class Service:
                 now = utcnow()
                 closing = request.intent.close_position_id is not None
                 blocked = await self.store.meta("blocked")
-                if (
-                    closing
-                    and blocked == "FEE_BUFFER_EXCEEDED"
-                    and await self.store.meta("fee_close_allowed", False)
+                if closing and (
+                    (
+                        blocked == "FEE_BUFFER_EXCEEDED"
+                        and await self.store.meta("fee_close_allowed", False)
+                    )
+                    or (
+                        blocked == "STOCK_SHORT_BUDGET_EXCEEDED"
+                        and await self.store.meta("short_budget_close_allowed", False)
+                    )
                 ):
                     blocked = None  # Every ownership, quantity and Portfolio check still applies.
                 reason = blocked or await self.store.meta("oms_blocked") or external_hold
@@ -265,6 +276,14 @@ class Service:
                             * request.intent.quantity
                         ),
                     )
+                    if request.intent.is_stock_short_open:
+                        order["reservations"][request.message_id][
+                            "stock_short_budget_per_share"
+                        ] = str(
+                            self.settings.instruments[
+                                request.intent.legs[0].instrument_id
+                            ].stock_short_budget_per_share
+                        )
                     await self.store.save_order(request.order_id, order)
                 data = decision.model_dump(mode="json")
                 audit = dict(

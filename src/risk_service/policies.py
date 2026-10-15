@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from oms_protocol.orders import OrderIntent
+from oms_protocol.orders import STOCK_SHORT_BUDGET_FACTOR, OrderIntent
 
 from .config import Settings
 
@@ -78,6 +78,7 @@ class Engine:
             return reject("STALE_DECISION")
         currency = intent.currency
         future = intent.legs[0].asset_type == "FUTURE"
+        stock_short = intent.is_stock_short_open
         if currency == "USD":
             account_limits, strategy_limits = s.account, s.strategies[strategy_id]
             fee_buffer = s.fee_buffer_per_unit_per_leg
@@ -92,9 +93,15 @@ class Engine:
             return reject("POSITION_VALIDATION_REQUIRED")
         for leg in intent.legs:
             if not closing and (
-                intent.structure == "SINGLE" and leg.side != "BUY" and leg.asset_type != "FUTURE"
+                intent.structure == "SINGLE"
+                and leg.side != "BUY"
+                and leg.asset_type not in {"STOCK", "FUTURE"}
             ):
                 return reject("POSITION_SUPPORT_REQUIRED")
+            if stock_short and leg.instrument_id not in s.stock_short_allowlist.get(
+                strategy_id, ()
+            ):
+                return reject("STOCK_SHORT_NOT_AUTHORIZED")
             reference = s.instruments.get(leg.instrument_id)
             if reference is None:
                 return reject("UNKNOWN_INSTRUMENT")
@@ -139,7 +146,7 @@ class Engine:
                 intent.net_price_effect
                 != (
                     ("DEBIT" if intent.legs[0].side == "BUY" else "CREDIT")
-                    if future
+                    if future or intent.legs[0].asset_type == "STOCK"
                     else ("CREDIT" if closing else "DEBIT")
                 )
                 or intent.limit_amount <= 0
@@ -148,8 +155,15 @@ class Engine:
             base = expiry_loss = (
                 s.instruments[intent.legs[0].instrument_id].future_contract_budget
                 if future
+                else s.instruments[intent.legs[0].instrument_id].stock_short_budget_per_share
+                if stock_short
                 else intent.limit_amount * multiplier
             ) * intent.quantity
+            if (
+                stock_short
+                and intent.limit_amount * STOCK_SHORT_BUDGET_FACTOR * intent.quantity > base
+            ):
+                return reject("STOCK_SHORT_BUDGET_EXCEEDED")
         else:
             width = abs(intent.legs[0].strike - intent.legs[1].strike)
             if not ZERO < intent.limit_amount <= width or (
@@ -162,7 +176,7 @@ class Engine:
         order_cost = cost
         if closing:
             cost = expiry_loss = ZERO
-        if future:
+        if future or stock_short:
             expiry_loss = None
         incremental = max(ZERO, cost - previous_cost)
         for name, limits, usage in (
@@ -203,5 +217,11 @@ class Engine:
             True,
             cost=cost,
             expiry_max_loss=expiry_loss,
-            risk_basis="FUTURES_CONTRACT_BUDGET" if future else "EXPIRY_MAX_LOSS",
+            risk_basis=(
+                "FUTURES_CONTRACT_BUDGET"
+                if future
+                else "STOCK_SHORT_NOTIONAL_BUDGET"
+                if stock_short
+                else "EXPIRY_MAX_LOSS"
+            ),
         )

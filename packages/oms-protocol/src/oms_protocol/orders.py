@@ -24,6 +24,7 @@ def decimal_input(value):
 
 
 Amount = Annotated[Decimal, BeforeValidator(decimal_input), Field(allow_inf_nan=False)]
+STOCK_SHORT_BUDGET_FACTOR = Decimal("2")
 
 
 class FrozenModel(BaseModel):
@@ -119,9 +120,9 @@ class OrderIntent(FrozenModel):
         if self.structure == "SINGLE":
             if len(self.legs) != 1 or self.legs[0].ratio != 1:
                 raise ValueError("SINGLE requires one ratio-1 leg")
-            if self.legs[0].asset_type == "FUTURE":
+            if self.legs[0].asset_type in {"STOCK", "FUTURE"}:
                 if self.net_price_effect != ("DEBIT" if self.legs[0].side == "BUY" else "CREDIT"):
-                    raise ValueError("future BUY requires DEBIT, SELL requires CREDIT")
+                    raise ValueError("stock/future BUY requires DEBIT, SELL requires CREDIT")
             elif closing and (self.legs[0].side != "SELL" or self.net_price_effect != "CREDIT"):
                 raise ValueError("single close supports SELL/CREDIT against a long lot only")
         else:
@@ -156,15 +157,24 @@ class OrderIntent(FrozenModel):
             structure="VERTICAL_CREDIT", legs=(short, long), net_price_effect="CREDIT", **kwargs
         )
 
+    @property
+    def is_stock_short_open(self):
+        return (
+            self.close_position_id is None
+            and self.structure == "SINGLE"
+            and self.legs[0].asset_type == "STOCK"
+            and self.legs[0].side == "SELL"
+        )
+
     @classmethod
     def close_position(cls, position_id: str, opening: "OrderIntent", **kwargs):
         """Build the inverse intent; Risk still verifies ownership and available quantity."""
         if opening.close_position_id or (
             opening.structure == "SINGLE"
             and opening.legs[0].side != "BUY"
-            and opening.legs[0].asset_type != "FUTURE"
+            and opening.legs[0].asset_type not in {"STOCK", "FUTURE"}
         ):
-            raise ValueError("expected a long single or credit vertical opening intent")
+            raise ValueError("expected stock/future, long option or credit vertical opening intent")
         if kwargs.pop("currency", opening.currency) != opening.currency:
             raise ValueError("close currency must match opening")
         if kwargs.pop("price_unit", opening.price_unit) != opening.price_unit:

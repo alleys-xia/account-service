@@ -1,0 +1,8 @@
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+strategies = ["alpha"]
+catalog_file = "risk.hk-futures.example.toml"
+database_url = "postgresql://localhost/portfolio_paper"
+nats_url = "nats://127.0.0.1:4223"
+# Supply PORTFOLIO_NATS_PASSWORD outside version control.

@@ -44,7 +44,8 @@ class Assessment:
     approved: bool
     reason: str = ""
     cost: Decimal = ZERO
-    expiry_max_loss: Decimal = ZERO
+    expiry_max_loss: Decimal | None = ZERO
+    risk_basis: str = "EXPIRY_MAX_LOSS"
 
 
 class Engine:
@@ -75,20 +76,45 @@ class Engine:
         age = (now - intent.decision_time).total_seconds()
         if age < -2 or age > s.max_decision_age:
             return reject("STALE_DECISION")
+        currency = intent.currency
+        future = intent.legs[0].asset_type == "FUTURE"
+        if currency == "USD":
+            account_limits, strategy_limits = s.account, s.strategies[strategy_id]
+            fee_buffer = s.fee_buffer_per_unit_per_leg
+        else:
+            account_limits = s.account_by_currency.get(currency)
+            strategy_limits = s.strategies_by_currency.get(strategy_id, {}).get(currency)
+            fee_buffer = s.fee_buffers_by_currency.get(currency)
+            if account_limits is None or strategy_limits is None or fee_buffer is None:
+                return reject("CURRENCY_POLICY_REQUIRED")
         closing = intent.close_position_id is not None
         if closing != reduce_only:
             return reject("POSITION_VALIDATION_REQUIRED")
         for leg in intent.legs:
-            if not closing and (intent.structure == "SINGLE" and leg.side != "BUY"):
+            if not closing and (
+                intent.structure == "SINGLE" and leg.side != "BUY" and leg.asset_type != "FUTURE"
+            ):
                 return reject("POSITION_SUPPORT_REQUIRED")
             reference = s.instruments.get(leg.instrument_id)
             if reference is None:
                 return reject("UNKNOWN_INSTRUMENT")
             if (
-                reference.asset_type != leg.asset_type
+                reference.currency != currency
+                or reference.asset_type != leg.asset_type
                 or reference.version != leg.instrument_version
             ):
                 return reject("INSTRUMENT_MISMATCH")
+            if leg.asset_type == "FUTURE":
+                if any(
+                    getattr(leg, name) != getattr(reference, name)
+                    for name in ("underlying", "expiry", "underlying_type", "settlement")
+                ):
+                    return reject("INSTRUMENT_MISMATCH")
+                dte = (reference.expiry - now.astimezone(ZoneInfo("Asia/Hong_Kong")).date()).days
+                if dte < (0 if closing else s.min_future_dte):
+                    return reject("FUTURE_EXPIRY_TOO_CLOSE")
+                if intent.limit_amount % 1:
+                    return reject("INVALID_FUTURE_TICK")
             if leg.asset_type == "OPTION":
                 if any(
                     getattr(leg, name) != getattr(reference, name)
@@ -110,11 +136,20 @@ class Engine:
         multiplier = s.instruments[intent.legs[0].instrument_id].multiplier
         if intent.structure == "SINGLE":
             if (
-                intent.net_price_effect != ("CREDIT" if closing else "DEBIT")
+                intent.net_price_effect
+                != (
+                    ("DEBIT" if intent.legs[0].side == "BUY" else "CREDIT")
+                    if future
+                    else ("CREDIT" if closing else "DEBIT")
+                )
                 or intent.limit_amount <= 0
             ):
                 return reject("INVALID_DEBIT")
-            base = expiry_loss = intent.limit_amount * multiplier * intent.quantity
+            base = expiry_loss = (
+                s.instruments[intent.legs[0].instrument_id].future_contract_budget
+                if future
+                else intent.limit_amount * multiplier
+            ) * intent.quantity
         else:
             width = abs(intent.legs[0].strike - intent.legs[1].strike)
             if not ZERO < intent.limit_amount <= width or (
@@ -123,31 +158,36 @@ class Engine:
                 return reject("INVALID_CLOSE_DEBIT" if closing else "INVALID_CREDIT")
             base = width * multiplier * intent.quantity
             expiry_loss = (width - intent.limit_amount) * multiplier * intent.quantity
-        cost = base + s.fee_buffer_per_unit_per_leg * len(intent.legs) * intent.quantity
+        cost = base + fee_buffer * len(intent.legs) * intent.quantity
         order_cost = cost
         if closing:
             cost = expiry_loss = ZERO
+        if future:
+            expiry_loss = None
         incremental = max(ZERO, cost - previous_cost)
         for name, limits, usage in (
-            ("ACCOUNT", s.account, account),
-            ("STRATEGY", s.strategies[strategy_id], strategy),
+            ("ACCOUNT", account_limits, account),
+            ("STRATEGY", strategy_limits, strategy),
         ):
-            if limits.halted and not closing:
+            global_limits = s.account if name == "ACCOUNT" else s.strategies[strategy_id]
+            if (global_limits.halted or limits.halted) and not closing:
                 return reject(name + "_HALTED")
             if order_cost > limits.max_order_cost:
                 return reject(name + "_ORDER_COST_EXCEEDED")
             if not closing and usage.committed + incremental > limits.max_committed:
                 return reject(name + "_BUDGET_EXCEEDED")
-            if usage.open_orders + (0 if replacing else 1) > limits.max_open_orders:
+            if usage.open_orders + (0 if replacing else 1) > global_limits.max_open_orders:
                 return reject(name + "_OPEN_ORDERS_EXCEEDED")
             maximum = (
                 limits.max_stock_quantity
                 if intent.legs[0].asset_type == "STOCK"
+                else limits.max_future_quantity
+                if future
                 else limits.max_option_quantity
             )
             if intent.quantity > maximum:
                 return reject(name + "_QUANTITY_EXCEEDED")
-            if usage.requests_last_minute >= limits.max_requests_per_minute:
+            if usage.requests_last_minute >= global_limits.max_requests_per_minute:
                 return reject(name + "_RATE_EXCEEDED")
         context = Context(intent, strategy_id, cost, previous_cost, account, strategy, now)
         try:
@@ -159,4 +199,9 @@ class Engine:
                     return reject(reason)
         except Exception:
             return reject("CUSTOM_RULE_ERROR")
-        return Assessment(True, cost=cost, expiry_max_loss=expiry_loss)
+        return Assessment(
+            True,
+            cost=cost,
+            expiry_max_loss=expiry_loss,
+            risk_basis="FUTURES_CONTRACT_BUDGET" if future else "EXPIRY_MAX_LOSS",
+        )

@@ -44,6 +44,7 @@ def exposure(orders, lots):
             total=pending + position,
             open=active(order),
             strategy=v["strategy_instance_id"],
+            currency=v["intent"].get("currency", "USD"),
         )
     return result
 

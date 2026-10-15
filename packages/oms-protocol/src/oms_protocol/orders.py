@@ -33,7 +33,7 @@ class FrozenModel(BaseModel):
 class OrderLeg(FrozenModel):
     instrument_id: Token
     instrument_version: int = Field(default=1, ge=1)
-    asset_type: Literal["STOCK", "OPTION"]
+    asset_type: Literal["STOCK", "OPTION", "FUTURE"]
     side: Literal["BUY", "SELL"]
     ratio: int = Field(default=1, ge=1)
     position_effect: Literal["OPEN", "CLOSE"] = "OPEN"
@@ -60,6 +60,17 @@ class OrderLeg(FrozenModel):
                 x is None for x in (self.underlying, self.expiry, self.right, self.strike)
             ):
                 raise ValueError("option requires option metadata and CONTRACTS unit")
+        elif self.asset_type == "FUTURE":
+            if (
+                self.quantity_unit != "CONTRACTS"
+                or self.underlying not in {"HSI", "MHI"}
+                or self.expiry is None
+                or self.underlying_type != "INDEX"
+                or self.settlement != "CASH"
+                or self.right is not None
+                or self.strike is not None
+            ):
+                raise ValueError("future requires an actual HSI/MHI expiry and INDEX/CASH metadata")
         elif self.quantity_unit != "SHARES":
             raise ValueError("stock requires SHARES unit")
         return self
@@ -72,8 +83,8 @@ class OrderIntent(FrozenModel):
     quantity: Amount = Field(gt=0)
     order_type: Literal["LIMIT"] = "LIMIT"
     limit_amount: Amount = Field(ge=0)
-    currency: Literal["USD"] = "USD"
-    price_unit: Literal["PER_SHARE_OR_COMBO_UNIT"] = "PER_SHARE_OR_COMBO_UNIT"
+    currency: Literal["USD", "HKD"] = "USD"
+    price_unit: Literal["PER_SHARE_OR_COMBO_UNIT", "INDEX_POINTS"] = "PER_SHARE_OR_COMBO_UNIT"
     net_price_effect: Literal["DEBIT", "CREDIT"] = "DEBIT"
     time_in_force: Literal["DAY", "GTC", "IOC"] = "DAY"
     decision_time: AwareDatetime = Field(default_factory=utcnow)
@@ -99,12 +110,19 @@ class OrderIntent(FrozenModel):
         if len({leg.instrument_id for leg in self.legs}) != len(self.legs):
             raise ValueError("each leg requires a distinct instrument identity")
         closing = self.close_position_id is not None
+        if any((x.asset_type == "FUTURE") != (self.currency == "HKD") for x in self.legs):
+            raise ValueError("HSI/MHI futures require HKD; US stocks/options require USD")
+        if (self.price_unit == "INDEX_POINTS") != (self.legs[0].asset_type == "FUTURE"):
+            raise ValueError("futures require INDEX_POINTS price unit")
         if any(x.position_effect != ("CLOSE" if closing else "OPEN") for x in self.legs):
             raise ValueError("all close legs require a position target; effects cannot be mixed")
         if self.structure == "SINGLE":
             if len(self.legs) != 1 or self.legs[0].ratio != 1:
                 raise ValueError("SINGLE requires one ratio-1 leg")
-            if closing and (self.legs[0].side != "SELL" or self.net_price_effect != "CREDIT"):
+            if self.legs[0].asset_type == "FUTURE":
+                if self.net_price_effect != ("DEBIT" if self.legs[0].side == "BUY" else "CREDIT"):
+                    raise ValueError("future BUY requires DEBIT, SELL requires CREDIT")
+            elif closing and (self.legs[0].side != "SELL" or self.net_price_effect != "CREDIT"):
                 raise ValueError("single close supports SELL/CREDIT against a long lot only")
         else:
             if closing != (self.structure == "VERTICAL_CLOSE"):
@@ -142,9 +160,15 @@ class OrderIntent(FrozenModel):
     def close_position(cls, position_id: str, opening: "OrderIntent", **kwargs):
         """Build the inverse intent; Risk still verifies ownership and available quantity."""
         if opening.close_position_id or (
-            opening.structure == "SINGLE" and opening.legs[0].side != "BUY"
+            opening.structure == "SINGLE"
+            and opening.legs[0].side != "BUY"
+            and opening.legs[0].asset_type != "FUTURE"
         ):
             raise ValueError("expected a long single or credit vertical opening intent")
+        if kwargs.pop("currency", opening.currency) != opening.currency:
+            raise ValueError("close currency must match opening")
+        if kwargs.pop("price_unit", opening.price_unit) != opening.price_unit:
+            raise ValueError("close price unit must match opening")
         legs = tuple(
             leg.model_copy(
                 update={"side": "SELL" if leg.side == "BUY" else "BUY", "position_effect": "CLOSE"}
@@ -155,7 +179,11 @@ class OrderIntent(FrozenModel):
             structure="SINGLE" if opening.structure == "SINGLE" else "VERTICAL_CLOSE",
             close_position_id=position_id,
             legs=legs,
-            net_price_effect="CREDIT" if opening.structure == "SINGLE" else "DEBIT",
+            net_price_effect=(
+                "CREDIT" if opening.structure == "SINGLE" and legs[0].side == "SELL" else "DEBIT"
+            ),
+            currency=opening.currency,
+            price_unit=opening.price_unit,
             **kwargs,
         )
 

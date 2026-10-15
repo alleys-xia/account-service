@@ -30,8 +30,14 @@ def validate_close(intent, strategy, lot):
     if lot["strategy_instance_id"] != strategy:
         raise ProtocolError("POSITION_OWNER_MISMATCH")
     opening = OrderIntent.model_validate(lot["opening_intent"])
-    if opening.structure == "SINGLE" and opening.legs[0].side != "BUY":
+    if (
+        opening.structure == "SINGLE"
+        and opening.legs[0].side != "BUY"
+        and opening.legs[0].asset_type != "FUTURE"
+    ):
         raise ProtocolError("UNSUPPORTED_POSITION")
+    if intent.currency != opening.currency:
+        raise ProtocolError("POSITION_CURRENCY_MISMATCH")
     expected = OrderIntent.close_position(
         lot["position_id"],
         opening,

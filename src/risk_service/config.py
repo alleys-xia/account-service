@@ -20,13 +20,16 @@ class Limits(FrozenModel):
     max_open_orders: int = Field(default=20, ge=1)
     max_stock_quantity: int = Field(default=1000, ge=1)
     max_option_quantity: int = Field(default=10, ge=1)
+    max_future_quantity: int = Field(default=1, ge=1)
     max_requests_per_minute: int = Field(default=60, ge=1)
 
 
 class Instrument(FrozenModel):
     version: int = Field(default=1, ge=1)
-    asset_type: Literal["STOCK", "OPTION"]
+    asset_type: Literal["STOCK", "OPTION", "FUTURE"]
     multiplier: Amount = Field(gt=0)
+    currency: Literal["USD", "HKD"] = "USD"
+    future_contract_budget: Amount | None = Field(default=None, gt=0)
     underlying: str | None = None
     expiry: date | None = None
     right: Literal["CALL", "PUT"] | None = None
@@ -43,6 +46,19 @@ class Instrument(FrozenModel):
                 x is not None for x in (self.expiry, self.right, self.strike)
             ):
                 raise ValueError("stock requires multiplier 1 and no option fields")
+        elif self.asset_type == "FUTURE":
+            if (
+                self.currency != "HKD"
+                or self.underlying not in {"HSI", "MHI"}
+                or self.multiplier != {"HSI": 50, "MHI": 10}.get(self.underlying)
+                or self.future_contract_budget is None
+                or self.expiry is None
+                or self.right is not None
+                or self.strike is not None
+                or self.underlying_type != "INDEX"
+                or self.settlement != "CASH"
+            ):
+                raise ValueError("invalid HK index futures catalog entry")
         elif self.multiplier != 100 or any(
             x is None for x in (self.underlying, self.expiry, self.right, self.strike)
         ):
@@ -51,6 +67,10 @@ class Instrument(FrozenModel):
             ("CASH", "EUROPEAN") if self.underlying_type == "INDEX" else ("PHYSICAL", "AMERICAN")
         ):
             raise ValueError("unsupported option settlement/exercise combination")
+        if self.asset_type != "FUTURE" and (
+            self.currency != "USD" or self.future_contract_budget is not None
+        ):
+            raise ValueError("stock/options require USD")
         return self
 
 
@@ -67,6 +87,10 @@ class Settings(FrozenModel):
     require_portfolio: bool = False
     approval_seconds: int = Field(default=5, ge=1, le=30)
     max_decision_age: int = Field(default=30, ge=1, le=300)
+    min_future_dte: int = Field(default=1, ge=1)
+    account_by_currency: dict[Literal["HKD"], Limits] = {}
+    strategies_by_currency: dict[Token, dict[Literal["HKD"], Limits]] = {}
+    fee_buffers_by_currency: dict[Literal["HKD"], Amount] = {}
     min_option_dte: int = Field(default=2, ge=1)
     fee_buffer_per_unit_per_leg: Amount = Field(default=Decimal("1"), ge=0)
     max_outbox: int = Field(default=10000, ge=100)
@@ -80,6 +104,8 @@ class Settings(FrozenModel):
         url = urlparse(self.nats_url)
         if url.scheme not in {"nats", "tls"} or not url.hostname or url.username or url.password:
             raise ValueError("NATS URL must not contain credentials")
+        if any(v < 0 for v in self.fee_buffers_by_currency.values()):
+            raise ValueError("fee buffers must be nonnegative")
         if not self.strategies or not self.instruments:
             raise ValueError("explicit strategy limits and instrument catalog required")
         return self
@@ -99,6 +125,10 @@ class Settings(FrozenModel):
                 mode="json",
                 include={
                     "account",
+                    "account_by_currency",
+                    "strategies_by_currency",
+                    "fee_buffers_by_currency",
+                    "min_future_dte",
                     "strategies",
                     "instruments",
                     "extra_rules",

@@ -77,9 +77,11 @@ class Service:
                     if old and (
                         old["strategy_instance_id"] != order["strategy_instance_id"]
                         or old["intent"]["legs"] != order["intent"]["legs"]
+                        or old["intent"].get("currency", "USD")
+                        != order["intent"].get("currency", "USD")
                     ):
                         raise ProtocolError("ORDER_LEG_IDENTITY_CHANGED")
-                    if order["intent"].get("currency", "USD") != "USD":
+                    if order["intent"].get("currency", "USD") not in {"USD", "HKD"}:
                         raise ProtocolError("UNSUPPORTED_CURRENCY")
                     await self.store.save_order(order["order_id"], order)
                 elif payload["kind"] == "execution":

@@ -10,13 +10,18 @@ from pydantic import Field, SecretStr, model_validator
 
 
 class Instrument(FrozenModel):
-    asset_type: Literal["STOCK", "OPTION"]
+    asset_type: Literal["STOCK", "OPTION", "FUTURE"]
     version: int = Field(default=1, ge=1)
     multiplier: Amount = Field(gt=0)
+    currency: Literal["USD", "HKD"] = "USD"
 
     @model_validator(mode="after")
     def standard(self):
-        if self.multiplier != (1 if self.asset_type == "STOCK" else 100):
+        if self.asset_type == "FUTURE":
+            if self.currency != "HKD" or self.multiplier not in {10, 50}:
+                raise ValueError("HK futures require HKD and multiplier 10/50")
+            return self
+        if self.currency != "USD" or self.multiplier != (1 if self.asset_type == "STOCK" else 100):
             raise ValueError("standard stock/option multipliers only")
         return self
 

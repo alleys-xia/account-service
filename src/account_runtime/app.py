@@ -19,7 +19,9 @@ def validate_domains(settings):
     _, risk, portfolio = settings
 
     def catalog(values):
-        return {name: (v.asset_type, v.version, v.multiplier) for name, v in values.items()}
+        return {
+            name: (v.asset_type, v.version, v.multiplier, v.currency) for name, v in values.items()
+        }
 
     if catalog(risk.instruments) != catalog(portfolio.instruments):
         raise ProtocolError("ACCOUNT_MODULE_CATALOG_MISMATCH")

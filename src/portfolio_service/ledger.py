@@ -15,9 +15,22 @@ def amount(value):
 def fold(records):
     quantity = average = realized = fees = cash = Decimal(0)
     multiplier = None
+    identity = None
     for row in records:
         if row.get("superseded"):
             continue
+        current = (
+            row.get("asset_type", "OPTION" if amount(row["multiplier"]) == 100 else "STOCK"),
+            row.get("currency", "USD"),
+        )
+        if (
+            current[0] == "FUTURE"
+            and (current[1] != "HKD" or amount(row["multiplier"]) not in {10, 50})
+        ) or (current[0] != "FUTURE" and current[1] != "USD"):
+            raise ProtocolError("INVALID_LEDGER_ASSET_CURRENCY")
+        if identity is not None and current != identity:
+            raise ProtocolError("LEDGER_ASSET_CURRENCY_MISMATCH")
+        identity = current
         size, price, fee, factor = (
             amount(row[k]) for k in ("quantity", "price", "fees", "multiplier")
         )
@@ -34,7 +47,8 @@ def fold(records):
             raise ProtocolError("MULTIPLIER_CHANGED")
         multiplier = factor
         delta = size if row["side"] == "BUY" else -size
-        cash -= delta * price * factor + fee
+        if current[0] != "FUTURE":
+            cash -= delta * price * factor + fee
         fees += fee
         if size == 0:
             continue
@@ -48,17 +62,20 @@ def fold(records):
             elif size == abs(quantity):
                 average = Decimal(0)
         quantity += delta
-    return dict(
+    result = dict(
         quantity=str(quantity),
         average_cost=str(average),
         multiplier=str(multiplier or 1),
         realized_pnl_gross=str(realized),
         fees=str(fees),
         realized_pnl_net=str(realized - fees),
-        trade_cash_flow=str(cash),
-        currency="USD",
+        trade_cash_flow=None if identity and identity[0] == "FUTURE" else str(cash),
+        currency=identity[1] if identity else "USD",
         unrealized_pnl=None,
     )
+    if identity and identity[0] == "FUTURE":
+        result.update(asset_type="FUTURE", settlement_status="FUTURES_SETTLEMENT_UNTRACKED")
+    return result
 
 
 def record(payload, order, seq, reference):
@@ -68,13 +85,14 @@ def record(payload, order, seq, reference):
         raise ProtocolError("UNKNOWN_EXECUTION_LEG")
     if (
         reference is None
+        or reference.currency != order["intent"].get("currency", "USD")
         or reference.asset_type != leg["asset_type"]
         or reference.version != leg["instrument_version"]
     ):
         raise ProtocolError("INSTRUMENT_CATALOG_MISMATCH")
     factor = reference.multiplier
-    if leg["asset_type"] not in {"STOCK", "OPTION"} or factor != (
-        1 if leg["asset_type"] == "STOCK" else 100
+    if leg["asset_type"] not in {"STOCK", "OPTION", "FUTURE"} or factor not in (
+        {10, 50} if leg["asset_type"] == "FUTURE" else {1 if leg["asset_type"] == "STOCK" else 100}
     ):
         raise ProtocolError("UNSUPPORTED_INSTRUMENT")
     return dict(
@@ -83,6 +101,7 @@ def record(payload, order, seq, reference):
         instrument=leg["instrument_id"],
         instrument_version=leg["instrument_version"],
         side=leg["side"],
+        **({"asset_type": "FUTURE", "currency": "HKD"} if leg["asset_type"] == "FUTURE" else {}),
         multiplier=str(factor),
         quantity=str(amount(payload["quantity"])),
         price=str(amount(payload["price"])),

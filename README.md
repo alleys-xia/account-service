@@ -40,3 +40,5 @@ account-service/
 本次复核（0.2.1）：OMS 支持 Execution 经逐腿成交核对后的 BROKER_CANCELLED 终态；仅释放未成交预算，保留已成交持仓预算。已通过临时 PostgreSQL 回归与独立复核。需与 Execution 0.3.1 协调升级。
 
 本轮（0.3.0）增加[手工持仓共存](docs/manual-positions.md)，保留真实风控与持仓核验；修复拒单／超时原因未写入快照，以及费用超额时自有减仓被一并阻断。完整 IB 模拟联调见[验收记录](docs/ib-full-chain-20261014.md)。
+
+港股恒指／小型恒指期货的币种限额与记账约定见 [设计](docs/hk-index-futures.md)，真实模拟账户结果见 [2026-10-15 验收](docs/hk-futures-validation-20261015.md)。

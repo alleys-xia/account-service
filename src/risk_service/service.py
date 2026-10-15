@@ -106,12 +106,14 @@ class Service:
                 raise ProtocolError("OVER_RESERVED_POSITION")
         return orders, lots, exposure(orders, lots)
 
-    async def usage(self, strategy, book=None):
+    async def usage(self, strategy, book=None, currency="USD"):
         orders, lots, costs = book or await self.book()
 
         def used(selected, count):
-            pending = sum((x["pending"] for x in selected), Decimal(0))
-            position = sum((x["position"] for x in selected), Decimal(0))
+            pending = sum((x["pending"] for x in selected if x["currency"] == currency), Decimal(0))
+            position = sum(
+                (x["position"] for x in selected if x["currency"] == currency), Decimal(0)
+            )
             return Usage(
                 pending + position, sum(x["open"] for x in selected), count, pending, position
             )
@@ -156,7 +158,9 @@ class Service:
                 order = await self.store.order(request.order_id)
                 book = await self.book()
                 orders, lots, costs = book
-                account, strategy, unsettled = await self.usage(request.strategy_instance_id, book)
+                account, strategy, unsettled = await self.usage(
+                    request.strategy_instance_id, book, request.intent.currency
+                )
                 now = utcnow()
                 closing = request.intent.close_position_id is not None
                 blocked = await self.store.meta("blocked")
@@ -252,7 +256,11 @@ class Service:
                         active=True,
                         definitely_not_executed=False,
                         fee_buffer=str(
-                            self.settings.fee_buffer_per_unit_per_leg
+                            (
+                                self.settings.fee_buffer_per_unit_per_leg
+                                if request.intent.currency == "USD"
+                                else self.settings.fee_buffers_by_currency[request.intent.currency]
+                            )
                             * len(request.intent.legs)
                             * request.intent.quantity
                         ),
@@ -262,7 +270,13 @@ class Service:
                 audit = dict(
                     policy_hash=self.settings.policy_hash,
                     cost=str(assessment.cost),
-                    expiry_max_loss=str(assessment.expiry_max_loss),
+                    expiry_max_loss=(
+                        str(assessment.expiry_max_loss)
+                        if assessment.expiry_max_loss is not None
+                        else None
+                    ),
+                    risk_basis=assessment.risk_basis,
+                    currency=request.intent.currency,
                     account_before=str(account.committed),
                     pending_before=str(account.pending),
                     position_before=str(account.position),
@@ -307,7 +321,25 @@ class Service:
                     pending=str(current.pending),
                     position=str(current.position),
                 )
+            per_currency = {}
+            for currency in {"USD", "HKD"}:
+                strategies = {}
+                for strategy in self.settings.strategies:
+                    bucket, current, _ = await self.usage(strategy, currency=currency)
+                    strategies[strategy] = dict(
+                        committed=str(current.committed),
+                        pending=str(current.pending),
+                        position=str(current.position),
+                    )
+                per_currency[currency] = dict(
+                    account_committed=str(bucket.committed),
+                    pending_risk=str(bucket.pending),
+                    position_risk=str(bucket.position),
+                    strategies=strategies,
+                )
             return dict(
+                currency="USD",
+                per_currency=per_currency,
                 mode=self.settings.mode,
                 trade_ready=False,
                 feed_epoch=await self.store.meta("feed_epoch"),

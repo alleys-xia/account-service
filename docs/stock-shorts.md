@@ -1,6 +1,6 @@
 # 美股开空与自有批次买回
 
-版本：account-service 0.5.0、oms-protocol / oms-client 0.6.0、portfolio-client 0.5.0，配套 Execution 0.6.0。全部服务和策略 SDK 需同步更新固定版本 wheel；无数据库结构迁移。
+版本：account-service 0.5.0、oms-protocol / oms-client 0.6.0、portfolio-client 0.5.0，配套 Execution 0.6.1。全部服务和策略 SDK 需同步更新固定版本 wheel；无数据库结构迁移。
 
 ## 订单契约与归属
 
@@ -15,14 +15,14 @@ Portfolio 保留带符号的数量，SELL 开仓为负，BUY 买回实现 `(开�
 在 Risk 配置顶层显式设置策略与 instrument_id 白名单（名称必须与实际运行实例一致）：
 
 ```toml
-stock_short_allowlist = { intraday_breakout = ["NVDA", "TSLA", "COIN", "MRNA", "CVX"] }
+stock_short_allowlist = { "breakout-frozen-paper" = ["TQQQ"] }
 ```
 
-每个获准股票的已有 `[instruments.<instrument_id>]` 条目增加正数 `stock_short_budget_per_share`。例如 `"400"` 表示每股预占 400 USD，另加费用；该示例仅在卖出限价不高于 200 USD 时允许开仓，不代表 NVDA 或其他股票的当前报价。不能把未经核验的示例预算当作部署值。
+每个获准股票的已有 `[instruments.<instrument_id>]` 条目增加正数 `stock_short_budget_per_share`。例如 `"400"` 表示每股预占 400 USD，另加费用；该示例仅在卖出限价不高于 200 USD 时允许开仓，不代表 TQQQ 或其他股票的当前报价。不能把未经核验的示例预算当作部署值。
 
 Risk 逐股固定预占该配置金额，而不把 SELL 限价当作最高成交价；开仓要求 `2 × limit_amount <= stock_short_budget_per_share`。评估结果使用 `risk_basis="STOCK_SHORT_NOTIONAL_BUDGET"`、`expiry_max_loss=null`。账户/策略 `max_order_cost` 至少须覆盖 `预算 × 该单股数 + 费用缓冲`，`max_committed` 还须覆盖并存持仓与挂单。所有获准股票必须在目录内；未知策略、未知合约、非股票或缺预算的白名单使配置加载失败。
 
-Execution 同时需要相同策略白名单及每股预算，并以新鲜 IB 买卖报价复核两倍预算条件；两侧目录和预算由运营者协调部署。Execution 设置及借券前置条件见其 `docs/stock-shorts.md`。本服务不把策略传入的价格引用当成券商借券证明。
+Execution 同时需要相同策略白名单及每股预算，并在发送前复核两倍 SELL 限价预算条件；两侧目录和预算由运营者协调部署。Execution 0.6.1 不再请求 IB 报价或可借券数量，借券、保证金和权限由 IB 收单时审核。设置见其 `docs/stock-shorts.md`；本服务不把策略传入的价格引用当成券商借券证明。
 
 ## 成交、预算越界与恢复
 

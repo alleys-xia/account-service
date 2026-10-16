@@ -1,0 +1,112 @@
+# 10 只测试标的 + 小恒指；账户额度未增加。
+stock_short_allowlist = { "intraday-breakout-paper" = ["NVDA", "TSLA", "META", "INTC", "MSTR", "SPCX", "JPM", "CVX", "GLD", "USO"], "breakout-legacy-paper" = ["NVDA", "TSLA", "META", "INTC", "MSTR", "SPCX", "JPM", "CVX", "GLD", "USO"], "breakout-frozen-paper" = ["NVDA", "TSLA", "META", "INTC", "MSTR", "SPCX", "JPM", "CVX", "GLD", "USO"] }
+# Add these entries to the active catalog; retain contracts with managed open lots.
+# Actual 2026-10 contracts were verified on 2026-10-15. Update expiry/identity manually.
+require_portfolio = true
+fee_buffer_per_unit_per_leg = "2"
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+database_url = "postgresql://localhost/intraday_us_risk"
+nats_url = "nats://127.0.0.1:4223"
+[account]
+max_order_cost = "15000"
+max_committed = "75000"
+[strategies.intraday-breakout-paper]
+max_order_cost = "15000"
+max_committed = "75000"
+[strategies.breakout-legacy-paper]
+max_order_cost = "15000"
+max_committed = "75000"
+
+[strategies.breakout-frozen-paper]
+max_order_cost = "15000"
+max_committed = "75000"
+[account_by_currency.HKD]
+max_order_cost = "2100000"
+max_committed = "3000000"
+max_future_quantity = 1
+[strategies_by_currency.intraday-breakout-paper.HKD]
+max_order_cost = "2100000"
+max_committed = "3000000"
+max_future_quantity = 1
+[strategies_by_currency.breakout-legacy-paper.HKD]
+max_order_cost = "2100000"
+max_committed = "3000000"
+max_future_quantity = 1
+
+[strategies_by_currency.breakout-frozen-paper.HKD]
+max_order_cost = "2100000"
+max_committed = "3000000"
+max_future_quantity = 1
+[fee_buffers_by_currency]
+HKD = "100"
+[instruments.MHI2610]
+asset_type = "FUTURE"
+currency = "HKD"
+multiplier = "10"
+future_contract_budget = "500000"
+underlying = "MHI"
+expiry = 2026-10-29
+underlying_type = "INDEX"
+settlement = "CASH"
+
+[instruments.NVDA]
+asset_type="STOCK"
+currency="USD"
+multiplier="1"
+stock_short_budget_per_share="500"
+
+[instruments.TSLA]
+asset_type="STOCK"
+currency="USD"
+multiplier="1"
+stock_short_budget_per_share="830"
+
+[instruments.CVX]
+asset_type="STOCK"
+currency="USD"
+multiplier="1"
+stock_short_budget_per_share="510"
+
+[instruments.META]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "1500"
+
+[instruments.INTC]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "200"
+
+[instruments.MSTR]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "350"
+
+[instruments.SPCX]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "350"
+
+[instruments.JPM]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "700"
+
+[instruments.GLD]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "800"
+
+[instruments.USO]
+asset_type = "STOCK"
+currency = "USD"
+multiplier = "1"
+stock_short_budget_per_share = "350"

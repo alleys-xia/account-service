@@ -3,10 +3,68 @@
 import argparse
 import asyncio
 import json
+import os
 import signal
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
+from oms_protocol.common import utcnow
 from oms_protocol.messages import ProtocolError
+
+_LOG_EVENTS = {
+    "account_started": "账户服务已启动",
+    "account_stopped": "账户服务已停止",
+    "account_failed": "账户服务失败",
+    "account_cleanup_incomplete": "账户服务清理未完成",
+    "oms_started": "OMS已启动",
+    "oms_stopped": "OMS已停止",
+    "oms_failed": "OMS失败",
+    "risk_started": "风控已启动",
+    "risk_stopped": "风控已停止",
+    "risk_failed": "风控失败",
+    "portfolio_started": "持仓服务已启动",
+    "portfolio_stopped": "持仓服务已停止",
+    "portfolio_failed": "持仓服务失败",
+    "strategy_recovery_started": "策略失联，开始清理自有委托和持仓",
+    "strategy_recovery_waiting": "策略自有持仓清理等待确认",
+    "strategy_recovery_completed": "策略自有委托和持仓已确认清理完成",
+}
+
+
+def log_event(event, *, level="INFO", **fields):
+    """Keep account identities, balances and credentials out of process logs."""
+    timestamp = (
+        utcnow().astimezone(ZoneInfo("Asia/Shanghai")).isoformat(sep=" ", timespec="seconds")
+    )
+    fields = {
+        key: value
+        for key, value in fields.items()
+        if key in {"mode", "modules", "error", "strategy"}
+    }
+    if os.environ.get("TRADING_LOG_FORMAT") == "json":
+        print(json.dumps(dict(timestamp=timestamp, level=level, event=event, **fields)), flush=True)
+        return
+    names = {"mode": "模式", "modules": "模块", "error": "错误", "strategy": "策略"}
+    values = {
+        "IB_PAPER": "IB模拟盘",
+        "SIMULATION": "本地模拟",
+        "WAITING_OPEN_CANCELLATION": "等待开仓撤单确认",
+        "WAITING_ORDER_RECONCILIATION": "等待订单对账",
+        "WAITING_PORTFOLIO_PROOF": "等待持仓及券商核对",
+        "WAITING_LOT_PROOF": "等待自有持仓明细确认",
+        "WAITING_POSITION_PROOF": "等待自有持仓数量核对",
+        "WAITING_LOT_RECONCILIATION": "自有持仓数量尚未确认",
+        "WAITING_OWNED_CLOSE": "等待自有持仓平仓确认",
+    }
+    parts = []
+    for key, value in fields.items():
+        value = "/".join(value) if isinstance(value, list) else values.get(str(value), value)
+        parts.append(f"{names[key]}={' '.join(str(value).split())}")
+    level_name = {"INFO": "信息", "WARNING": "警告", "ERROR": "错误"}[level]
+    print(
+        f"{timestamp} {level_name} [账户] {_LOG_EVENTS.get(event, event)} {' '.join(parts)}".rstrip(),
+        flush=True,
+    )
 
 
 def validate_domains(settings):
@@ -64,22 +122,29 @@ async def run(oms_settings, risk_settings, portfolio_settings, *, stop=None):
             )
             stores.append(store)
             await store.open()
-            transport = transport_type(service_type(settings, store))
+            options = (
+                {"recovery_allowlist": risk_settings.paper_signal_only_allowlist}
+                if service_type is Oms
+                else {}
+            )
+            transport = transport_type(service_type(settings, store, **options))
             transports.append(transport)
             await transport.start()
             if any(t.failure.done() for t in transports):
                 raise ProtocolError("ACCOUNT_MODULE_START_FAILED")
-        print(
-            json.dumps(
-                dict(
-                    event="account_started",
-                    modules=["oms", "risk", "portfolio"],
-                    mode=oms_settings.mode,
-                    trade_ready=False,
-                )
-            ),
-            flush=True,
-        )
+        recovery = transports[0].service.recovery
+        portfolio = transports[1]
+
+        async def recovery_snapshot():
+            async with portfolio.gate:
+                await portfolio.catchup()
+                return await portfolio.service.snapshot()
+
+        recovery.snapshot = recovery_snapshot
+        recovery.max_snapshot_age = portfolio_settings.max_snapshot_age
+        recovery.log = log_event
+        transports[0].spawn(recovery.run())
+        log_event("account_started", modules=["oms", "risk", "portfolio"], mode=oms_settings.mode)
         waiter = asyncio.create_task(stop.wait())
         done, _ = await asyncio.wait(
             [waiter, *(t.failure for t in transports)], return_when=asyncio.FIRST_COMPLETED
@@ -95,7 +160,9 @@ async def run(oms_settings, risk_settings, portfolio_settings, *, stop=None):
         results = await asyncio.gather(*(t.close() for t in transports), return_exceptions=True)
         results += await asyncio.gather(*(s.close() for s in stores), return_exceptions=True)
         if any(isinstance(x, BaseException) for x in results):
-            print(json.dumps(dict(event="account_cleanup_incomplete")), flush=True)
+            log_event("account_cleanup_incomplete", level="WARNING")
+        else:
+            log_event("account_stopped")
 
 
 def main():
@@ -115,14 +182,10 @@ def main():
     except KeyboardInterrupt:
         pass
     except Exception as error:
-        print(
-            json.dumps(
-                dict(
-                    event="account_failed",
-                    error=error.code if isinstance(error, ProtocolError) else type(error).__name__,
-                )
-            ),
-            flush=True,
+        log_event(
+            "account_failed",
+            level="ERROR",
+            error=error.code if isinstance(error, ProtocolError) else type(error).__name__,
         )
         raise SystemExit(1) from None
 

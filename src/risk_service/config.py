@@ -51,17 +51,17 @@ class Instrument(FrozenModel):
                 raise ValueError("stock requires multiplier 1 and no option fields")
         elif self.asset_type == "FUTURE":
             if (
-                self.currency != "HKD"
-                or self.underlying not in {"HSI", "MHI"}
-                or self.multiplier != {"HSI": 50, "MHI": 10}.get(self.underlying)
-                or self.future_contract_budget is None
+                self.underlying not in {"HSI", "MHI", "MES"}
+                or self.currency != ("USD" if self.underlying == "MES" else "HKD")
+                or self.multiplier != {"HSI": 50, "MHI": 10, "MES": 5}.get(self.underlying)
+                or (self.underlying != "MES" and self.future_contract_budget is None)
                 or self.expiry is None
                 or self.right is not None
                 or self.strike is not None
                 or self.underlying_type != "INDEX"
                 or self.settlement != "CASH"
             ):
-                raise ValueError("invalid HK index futures catalog entry")
+                raise ValueError("invalid supported index futures catalog entry")
         elif self.multiplier != 100 or any(
             x is None for x in (self.underlying, self.expiry, self.right, self.strike)
         ):
@@ -101,6 +101,7 @@ class Settings(FrozenModel):
     strategies: dict[Token, Limits]
     instruments: dict[Token, Instrument]
     stock_short_allowlist: dict[Token, tuple[Token, ...]] = {}
+    paper_signal_only_allowlist: dict[Token, tuple[Token, ...]] = {}
     extra_rules: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -112,6 +113,19 @@ class Settings(FrozenModel):
             raise ValueError("fee buffers must be nonnegative")
         if not self.strategies or not self.instruments:
             raise ValueError("explicit strategy limits and instrument catalog required")
+        if self.paper_signal_only_allowlist and (
+            self.mode != "IB_PAPER" or not self.require_portfolio
+        ):
+            raise ValueError("signal-only admission requires IB_PAPER and Portfolio reconciliation")
+        for strategy, names in self.paper_signal_only_allowlist.items():
+            if strategy not in self.strategies or not names or len(set(names)) != len(names):
+                raise ValueError(
+                    "signal-only allowlist requires a known strategy and unique instruments"
+                )
+            for name in names:
+                ref = self.instruments.get(name)
+                if ref is None or ref.asset_type != "FUTURE" or ref.underlying != "MES":
+                    raise ValueError("signal-only admission supports configured MES contracts only")
         for strategy, names in self.stock_short_allowlist.items():
             if strategy not in self.strategies or len(set(names)) != len(names):
                 raise ValueError("short allowlist requires a known strategy and unique instruments")
@@ -149,6 +163,7 @@ class Settings(FrozenModel):
                     "strategies",
                     "instruments",
                     "stock_short_allowlist",
+                    "paper_signal_only_allowlist",
                     "extra_rules",
                     "max_decision_age",
                     "min_option_dte",

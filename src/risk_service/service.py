@@ -218,6 +218,33 @@ class Service:
                             raise ProtocolError("INSUFFICIENT_CLOSE_QUANTITY")
                     except ProtocolError as exc:
                         reason = exc.code
+                if (
+                    not reason
+                    and not closing
+                    and request.intent.order_type == "MARKET"
+                    and request.intent.legs[0].instrument_id
+                    in self.settings.paper_signal_only_allowlist.get(
+                        request.strategy_instance_id, ()
+                    )
+                ):
+                    held = Decimal(0)
+                    for oid, other in orders.items():
+                        v = other["view"]
+                        if (
+                            oid == request.order_id
+                            or not v
+                            or v["strategy_instance_id"] != request.strategy_instance_id
+                            or v["intent"].get("close_position_id")
+                            or v["intent"]["legs"][0].get("underlying") != "MES"
+                        ):
+                            continue
+                        held += Decimal(lots[oid]["risk_quantity"])
+                        if active(other):
+                            held += max(
+                                Decimal(0), Decimal(v["intent"]["quantity"]) - min(units(v))
+                            )
+                    if held + request.intent.quantity > 1:
+                        reason = "SIGNAL_ONLY_POSITION_LIMIT"
                 pending = await self.store.one(
                     "SELECT count(*) AS n FROM risk.outbox WHERE NOT published"
                 )
@@ -250,6 +277,7 @@ class Service:
                     reservation_id=uid() if assessment.approved else None,
                     approved_quantity=request.intent.quantity if assessment.approved else None,
                     approved_limit=request.intent.limit_amount if assessment.approved else None,
+                    order_type=request.intent.order_type,
                     valid_until=min(
                         request.intent.deadline_at,
                         now + timedelta(seconds=self.settings.approval_seconds),
@@ -266,8 +294,11 @@ class Service:
                         close_position_id=request.intent.close_position_id,
                         active=True,
                         definitely_not_executed=False,
+                        paper_signal_only=assessment.risk_basis == "PAPER_SIGNAL_ONLY",
                         fee_buffer=str(
-                            (
+                            Decimal(0)
+                            if assessment.risk_basis == "PAPER_SIGNAL_ONLY"
+                            else (
                                 self.settings.fee_buffer_per_unit_per_leg
                                 if request.intent.currency == "USD"
                                 else self.settings.fee_buffers_by_currency[request.intent.currency]

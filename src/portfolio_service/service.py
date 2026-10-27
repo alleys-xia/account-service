@@ -264,6 +264,7 @@ class Service:
                 as_of=utcnow().isoformat(),
                 applied_account_seq=seq,
                 feed_epoch=epoch,
+                execution_session=broker["snapshot"]["source_session"] if broker else None,
                 strategy_seq=revision,
                 reconciliation_status=status,
                 reason=blocked or broker_error,

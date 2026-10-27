@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, model_serializer, model_validator
 
 from .common import Identifier, Token, digest, uid, utcnow
 from .orders import Amount, FrozenModel, OrderIntent
@@ -77,6 +77,7 @@ class RiskDecision(Scoped):
     reservation_id: Identifier | None = None
     approved_quantity: Amount | None = Field(default=None, gt=0)
     approved_limit: Amount | None = Field(default=None, ge=0)
+    order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
     valid_until: AwareDatetime
     applied_account_seq: int = Field(ge=0)
     reason: str = Field(default="", max_length=1024)
@@ -84,11 +85,21 @@ class RiskDecision(Scoped):
 
     @model_validator(mode="after")
     def approval_fields(self):
-        if self.approved and any(
-            x is None for x in (self.reservation_id, self.approved_quantity, self.approved_limit)
-        ):
+        if self.approved and any(x is None for x in (self.reservation_id, self.approved_quantity)):
             raise ValueError("approval requires reservation and explicit bounds")
+        if self.approved and (
+            (self.order_type == "LIMIT" and self.approved_limit is None)
+            or (self.order_type == "MARKET" and self.approved_limit is not None)
+        ):
+            raise ValueError("approval price bound must match order type")
         return self
+
+    @model_serializer(mode="wrap")
+    def wire(self, handler):
+        value = handler(self)
+        if self.order_type == "LIMIT":
+            value.pop("order_type", None)
+        return value
 
 
 class ExecutionCommand(Scoped):

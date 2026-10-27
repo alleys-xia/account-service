@@ -25,7 +25,8 @@ def fold(records):
         )
         if (
             current[0] == "FUTURE"
-            and (current[1] != "HKD" or amount(row["multiplier"]) not in {10, 50})
+            and (current[1], amount(row["multiplier"]))
+            not in {("HKD", 10), ("HKD", 50), ("USD", 5)}
         ) or (current[0] != "FUTURE" and current[1] != "USD"):
             raise ProtocolError("INVALID_LEDGER_ASSET_CURRENCY")
         if identity is not None and current != identity:
@@ -92,7 +93,9 @@ def record(payload, order, seq, reference):
         raise ProtocolError("INSTRUMENT_CATALOG_MISMATCH")
     factor = reference.multiplier
     if leg["asset_type"] not in {"STOCK", "OPTION", "FUTURE"} or factor not in (
-        {10, 50} if leg["asset_type"] == "FUTURE" else {1 if leg["asset_type"] == "STOCK" else 100}
+        ({5} if reference.currency == "USD" else {10, 50})
+        if leg["asset_type"] == "FUTURE"
+        else {1 if leg["asset_type"] == "STOCK" else 100}
     ):
         raise ProtocolError("UNSUPPORTED_INSTRUMENT")
     return dict(
@@ -101,7 +104,11 @@ def record(payload, order, seq, reference):
         instrument=leg["instrument_id"],
         instrument_version=leg["instrument_version"],
         side=leg["side"],
-        **({"asset_type": "FUTURE", "currency": "HKD"} if leg["asset_type"] == "FUTURE" else {}),
+        **(
+            {"asset_type": "FUTURE", "currency": reference.currency}
+            if leg["asset_type"] == "FUTURE"
+            else {}
+        ),
         multiplier=str(factor),
         quantity=str(amount(payload["quantity"])),
         price=str(amount(payload["price"])),

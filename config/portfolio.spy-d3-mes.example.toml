@@ -1,0 +1,10 @@
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+strategies = ["spy_d3_r01", "spy_d3_r06"]
+catalog_file = "risk.spy-d3-mes.example.toml"
+database_url = "postgresql://localhost/portfolio_ib_paper"
+nats_url = "nats://127.0.0.1:4223"
+broker_interval = 5
+max_snapshot_age = 30
+# Merge any existing managed strategies/catalog entries. PORTFOLIO_NATS_PASSWORD is private.

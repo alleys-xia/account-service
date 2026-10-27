@@ -29,3 +29,5 @@ CREATE TABLE IF NOT EXISTS oms.quarantine (
 );
 
 ALTER TABLE oms.inbox ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS oms.strategy_recoveries (strategy text PRIMARY KEY, data jsonb NOT NULL);

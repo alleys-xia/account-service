@@ -91,6 +91,14 @@ class Engine:
         closing = intent.close_position_id is not None
         if closing != reduce_only:
             return reject("POSITION_VALIDATION_REQUIRED")
+        allowed_mes = s.paper_signal_only_allowlist.get(strategy_id, ())
+        signal_only = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mes
+        if signal_only and intent.order_type != "MARKET":
+            return reject("SIGNAL_ONLY_MARKET_REQUIRED")
+        if intent.order_type == "MARKET" and not signal_only:
+            return reject("MARKET_NOT_AUTHORIZED")
+        if signal_only and (intent.quantity != 1 or replacing):
+            return reject("SIGNAL_ONLY_QUANTITY_OR_REPLACE")
         for leg in intent.legs:
             if not closing and (
                 intent.structure == "SINGLE"
@@ -117,10 +125,12 @@ class Engine:
                     for name in ("underlying", "expiry", "underlying_type", "settlement")
                 ):
                     return reject("INSTRUMENT_MISMATCH")
-                dte = (reference.expiry - now.astimezone(ZoneInfo("Asia/Hong_Kong")).date()).days
+                zone = "America/New_York" if reference.underlying == "MES" else "Asia/Hong_Kong"
+                dte = (reference.expiry - now.astimezone(ZoneInfo(zone)).date()).days
                 if dte < (0 if closing else s.min_future_dte):
                     return reject("FUTURE_EXPIRY_TOO_CLOSE")
-                if intent.limit_amount % 1:
+                tick = Decimal("0.25") if reference.underlying == "MES" else Decimal(1)
+                if intent.limit_amount is not None and intent.limit_amount % tick:
                     return reject("INVALID_FUTURE_TICK")
             if leg.asset_type == "OPTION":
                 if any(
@@ -141,7 +151,10 @@ class Engine:
                 ):
                     return reject("OPTION_EXPIRY_TOO_CLOSE")
         multiplier = s.instruments[intent.legs[0].instrument_id].multiplier
-        if intent.structure == "SINGLE":
+        if signal_only:
+            base = expiry_loss = ZERO
+            fee_buffer = ZERO
+        elif intent.structure == "SINGLE":
             if (
                 intent.net_price_effect
                 != (
@@ -152,13 +165,16 @@ class Engine:
                 or intent.limit_amount <= 0
             ):
                 return reject("INVALID_DEBIT")
-            base = expiry_loss = (
+            unit_budget = (
                 s.instruments[intent.legs[0].instrument_id].future_contract_budget
                 if future
                 else s.instruments[intent.legs[0].instrument_id].stock_short_budget_per_share
                 if stock_short
                 else intent.limit_amount * multiplier
-            ) * intent.quantity
+            )
+            if unit_budget is None:
+                return reject("FUTURE_BUDGET_REQUIRED")
+            base = expiry_loss = unit_budget * intent.quantity
             if (
                 stock_short
                 and intent.limit_amount * STOCK_SHORT_BUDGET_FACTOR * intent.quantity > base
@@ -186,9 +202,13 @@ class Engine:
             global_limits = s.account if name == "ACCOUNT" else s.strategies[strategy_id]
             if (global_limits.halted or limits.halted) and not closing:
                 return reject(name + "_HALTED")
-            if order_cost > limits.max_order_cost:
+            if not signal_only and order_cost > limits.max_order_cost:
                 return reject(name + "_ORDER_COST_EXCEEDED")
-            if not closing and usage.committed + incremental > limits.max_committed:
+            if (
+                not signal_only
+                and not closing
+                and usage.committed + incremental > limits.max_committed
+            ):
                 return reject(name + "_BUDGET_EXCEEDED")
             if usage.open_orders + (0 if replacing else 1) > global_limits.max_open_orders:
                 return reject(name + "_OPEN_ORDERS_EXCEEDED")
@@ -218,7 +238,9 @@ class Engine:
             cost=cost,
             expiry_max_loss=expiry_loss,
             risk_basis=(
-                "FUTURES_CONTRACT_BUDGET"
+                "PAPER_SIGNAL_ONLY"
+                if signal_only
+                else "FUTURES_CONTRACT_BUDGET"
                 if future
                 else "STOCK_SHORT_NOTIONAL_BUDGET"
                 if stock_short

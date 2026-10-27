@@ -2,10 +2,11 @@
 
 import argparse
 import asyncio
-import json
 import signal
 
 from oms_protocol.messages import ProtocolError
+
+from account_runtime.app import log_event
 
 from .config import load_settings
 from .service import Service
@@ -30,18 +31,7 @@ async def run(settings):
         await store.open()
         transport = Transport(Service(settings, store))
         await transport.start()
-        print(
-            json.dumps(
-                dict(
-                    event="portfolio_started",
-                    environment=settings.environment,
-                    account_id=settings.account_id,
-                    mode=settings.mode,
-                    trade_ready=False,
-                )
-            ),
-            flush=True,
-        )
+        log_event("portfolio_started", mode=settings.mode)
         waiter = asyncio.create_task(stopping.wait())
         done, _ = await asyncio.wait(
             (waiter, transport.failure), return_when=asyncio.FIRST_COMPLETED
@@ -57,6 +47,7 @@ async def run(settings):
                 await transport.close()
         finally:
             await store.close()
+            log_event("portfolio_stopped")
 
 
 def main():
@@ -71,14 +62,10 @@ def main():
         pass
     except Exception as error:
         # DSNs and credentials must not appear in logs or tracebacks.
-        print(
-            json.dumps(
-                dict(
-                    event="portfolio_failed",
-                    error=error.code if isinstance(error, ProtocolError) else type(error).__name__,
-                )
-            ),
-            flush=True,
+        log_event(
+            "portfolio_failed",
+            level="ERROR",
+            error=error.code if isinstance(error, ProtocolError) else type(error).__name__,
         )
         raise SystemExit(1) from None
 

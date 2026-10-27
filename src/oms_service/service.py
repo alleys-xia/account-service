@@ -8,11 +8,13 @@ from oms_protocol.orders import OrderUpdate, ViewSnapshot
 from psycopg.types.json import Jsonb
 
 from .domain import TERMINAL, Order, apply_execution, intent_hash, validate_replacement
+from .recovery import Recovery
 
 
 class Service:
-    def __init__(self, settings, store):
+    def __init__(self, settings, store, *, recovery_allowlist=None):
         self.settings, self.store = settings, store
+        self.recovery = Recovery(self, recovery_allowlist)
 
     def scope(self, message, strategy=None):
         if (
@@ -193,6 +195,11 @@ class Service:
             if existing is not None:
                 return existing
             try:
+                recovery = await self.recovery.current(strategy)
+                if self.recovery.active(recovery) and not self.recovery.authorizes(
+                    recovery, command
+                ):
+                    raise ProtocolError("STRATEGY_RECOVERY_IN_PROGRESS")
                 await self.session(strategy, command.session_token, command.session_epoch)
                 if command.deadline_at <= utcnow():
                     raise ProtocolError("COMMAND_EXPIRED")
@@ -337,6 +344,7 @@ class Service:
                     elif (
                         decision.approved_quantity != request.intent.quantity
                         or decision.approved_limit != request.intent.limit_amount
+                        or decision.order_type != request.intent.order_type
                     ):
                         raise ProtocolError("RISK_APPROVED_BOUNDS_MISMATCH")
                     elif min(decision.valid_until, request.intent.deadline_at) <= utcnow():
@@ -482,18 +490,24 @@ class Service:
                 if updated.consistency == "RECONCILIATION_REQUIRED":
                     await self.store.set_meta("blocked", "EXECUTION_RECONCILIATION_REQUIRED")
                 await self.store.save(updated)
+                if report.kind == "FILL":
+                    await self.recovery.observe(updated.strategy_instance_id)
                 await self.store.remember(
                     "execution", report.event_id, digest(data), {"processed": True}, data
                 )
             except ProtocolError as error:
                 await self.store.quarantine("execution", report.event_id, error.code, data)
 
-    async def rpc(self, request, strategy):
-        self.scope(request, strategy)
+    async def acquire(self, request, strategy):
+        # A newly claimed cleanup must commit before its explicit acquisition error is raised.
+        # Raising inside the transaction would roll back both the barrier and its lease.
+        recovering = False
         async with self.store.transaction():
-            if request.operation == "acquire":
-                if not request.run_id:
-                    raise ProtocolError("RUN_ID_REQUIRED")
+            if not request.run_id:
+                raise ProtocolError("RUN_ID_REQUIRED")
+            recovery = await self.recovery.claim(strategy)
+            recovering = self.recovery.active(recovery)
+            if not recovering:
                 row = await self.store.one(
                     "SELECT data FROM oms.sessions WHERE strategy=%s", (strategy,)
                 )
@@ -517,13 +531,30 @@ class Service:
                     "INSERT INTO oms.sessions VALUES (%s,%s) ON CONFLICT(strategy) DO UPDATE SET data=excluded.data",
                     (strategy, Jsonb(session)),
                 )
-                return dict(
+                result = dict(
                     session=session,
                     feed_epoch=self.store.feed_epoch,
                     mode=self.settings.mode,
                     trade_ready=False,
                 )
-            await self.session(strategy, request.session_token, request.session_epoch)
+        if recovering:
+            raise ProtocolError("STRATEGY_RECOVERY_IN_PROGRESS")
+        return result
+
+    async def rpc(self, request, strategy):
+        self.scope(request, strategy)
+        if request.operation == "acquire":
+            return await self.acquire(request, strategy)
+        async with self.store.transaction():
+            recovery = await self.recovery.current(strategy)
+            recovering = self.recovery.active(recovery)
+            if (
+                request.operation not in {"snapshot", "events", "command", "health"}
+                or not recovering
+            ):
+                if recovering:
+                    raise ProtocolError("STRATEGY_RECOVERY_IN_PROGRESS")
+                await self.session(strategy, request.session_token, request.session_epoch)
             if request.operation in {"renew", "release"}:
                 session = await self.session(strategy, request.session_token, request.session_epoch)
                 session["expires_at"] = (
@@ -552,7 +583,10 @@ class Service:
                     applied_account_seq=await self.store.meta("account_seq", 0),
                     strategy_seq=head["seq"] if head else 0,
                     feed_epoch=self.store.feed_epoch,
-                    reconciliation_status="RECONCILIATION_REQUIRED"
+                    reason="STRATEGY_RECOVERY_IN_PROGRESS" if recovering else None,
+                    reconciliation_status="STRATEGY_RECOVERING"
+                    if recovering
+                    else "RECONCILIATION_REQUIRED"
                     if await self.store.meta("blocked")
                     else (
                         "SIMULATION_ONLY"
@@ -597,6 +631,7 @@ class Service:
                 blocked=await self.store.meta("blocked"),
                 pending_outbox=pending["n"],
                 feed_epoch=self.store.feed_epoch,
+                recovery=self.recovery.public(recovery),
             )
 
     async def execution_rpc(self, request):

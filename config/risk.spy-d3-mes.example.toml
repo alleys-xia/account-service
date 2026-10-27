@@ -1,0 +1,29 @@
+# Merge explicitly selected catalog/strategy entries into your own paper account config.
+# Before each startup, confirm MES_SELECTED identifies the actual IB expiry, matching
+# Execution and both strategy instances. Placeholder expiry is NOT a verified contract.
+environment = "paper"
+mode = "IB_PAPER"
+account_id = "paperib"
+database_url = "postgresql://localhost/risk_ib_paper"
+nats_url = "nats://127.0.0.1:4223"
+require_portfolio = true
+
+[strategies.spy_d3_r01]
+max_future_quantity = 1
+[strategies.spy_d3_r06]
+max_future_quantity = 1
+
+[paper_signal_only_allowlist]
+spy_d3_r01 = ["MES_SELECTED"]
+spy_d3_r06 = ["MES_SELECTED"]
+
+[instruments.MES_SELECTED]
+asset_type = "FUTURE"
+currency = "USD"
+multiplier = "5"
+underlying = "MES"
+expiry = 2099-12-31 # Replace with the selected actual expiry; retain owned old lots in the catalog.
+underlying_type = "INDEX"
+settlement = "CASH"
+# No future_contract_budget or fee budget for the explicitly allowlisted MARKET mode.
+# RISK_NATS_PASSWORD comes from the environment. Other instruments keep existing policy.

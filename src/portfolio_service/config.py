@@ -18,8 +18,10 @@ class Instrument(FrozenModel):
     @model_validator(mode="after")
     def standard(self):
         if self.asset_type == "FUTURE":
-            if self.currency != "HKD" or self.multiplier not in {10, 50}:
-                raise ValueError("HK futures require HKD and multiplier 10/50")
+            if (self.currency, self.multiplier) not in {("HKD", 10), ("HKD", 50), ("USD", 5)}:
+                raise ValueError(
+                    "supported futures require HKD multiplier 10/50 or MES USD multiplier 5"
+                )
             return self
         if self.currency != "USD" or self.multiplier != (1 if self.asset_type == "STOCK" else 100):
             raise ValueError("standard stock/option multipliers only")

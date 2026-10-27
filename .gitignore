@@ -16,3 +16,13 @@ build/
 *.egg-info/
 *.key
 *.pem
+.runtime/
+.state/
+secrets/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.creds
+.DS_Store

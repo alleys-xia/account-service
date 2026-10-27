@@ -64,14 +64,16 @@ class OrderLeg(FrozenModel):
         elif self.asset_type == "FUTURE":
             if (
                 self.quantity_unit != "CONTRACTS"
-                or self.underlying not in {"HSI", "MHI"}
+                or self.underlying not in {"HSI", "MHI", "MES"}
                 or self.expiry is None
                 or self.underlying_type != "INDEX"
                 or self.settlement != "CASH"
                 or self.right is not None
                 or self.strike is not None
             ):
-                raise ValueError("future requires an actual HSI/MHI expiry and INDEX/CASH metadata")
+                raise ValueError(
+                    "future requires an actual HSI/MHI/MES expiry and INDEX/CASH metadata"
+                )
         elif self.quantity_unit != "SHARES":
             raise ValueError("stock requires SHARES unit")
         return self
@@ -82,8 +84,8 @@ class OrderIntent(FrozenModel):
     close_position_id: Identifier | None = None
     legs: tuple[OrderLeg, ...] = Field(min_length=1, max_length=2)
     quantity: Amount = Field(gt=0)
-    order_type: Literal["LIMIT"] = "LIMIT"
-    limit_amount: Amount = Field(ge=0)
+    order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
+    limit_amount: Amount | None = Field(default=None, ge=0)
     currency: Literal["USD", "HKD"] = "USD"
     price_unit: Literal["PER_SHARE_OR_COMBO_UNIT", "INDEX_POINTS"] = "PER_SHARE_OR_COMBO_UNIT"
     net_price_effect: Literal["DEBIT", "CREDIT"] = "DEBIT"
@@ -111,8 +113,22 @@ class OrderIntent(FrozenModel):
         if len({leg.instrument_id for leg in self.legs}) != len(self.legs):
             raise ValueError("each leg requires a distinct instrument identity")
         closing = self.close_position_id is not None
-        if any((x.asset_type == "FUTURE") != (self.currency == "HKD") for x in self.legs):
-            raise ValueError("HSI/MHI futures require HKD; US stocks/options require USD")
+        if any(
+            self.currency
+            != ("HKD" if x.asset_type == "FUTURE" and x.underlying in {"HSI", "MHI"} else "USD")
+            for x in self.legs
+        ):
+            raise ValueError("HSI/MHI require HKD; MES and US stocks/options require USD")
+        if self.order_type == "MARKET":
+            if (
+                self.limit_amount is not None
+                or self.structure != "SINGLE"
+                or self.legs[0].asset_type != "FUTURE"
+                or self.legs[0].underlying != "MES"
+            ):
+                raise ValueError("MARKET requires SINGLE MES and no limit amount")
+        elif self.limit_amount is None:
+            raise ValueError("LIMIT requires a limit amount")
         if (self.price_unit == "INDEX_POINTS") != (self.legs[0].asset_type == "FUTURE"):
             raise ValueError("futures require INDEX_POINTS price unit")
         if any(x.position_effect != ("CLOSE" if closing else "OPEN") for x in self.legs):
@@ -259,6 +275,8 @@ class ViewSnapshot(FrozenModel):
     applied_account_seq: int | None = None
     strategy_seq: int | None = None
     feed_epoch: str | None = None
+    # Execution's broker connection identity, retained even during source unavailability.
+    execution_session: str | None = None
     reconciliation_status: str = "UNAVAILABLE"
     reason: str | None = None
 

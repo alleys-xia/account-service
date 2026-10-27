@@ -42,6 +42,7 @@ def validate_close(intent, strategy, lot):
         lot["position_id"],
         opening,
         quantity=intent.quantity,
+        order_type=intent.order_type,
         limit_amount=intent.limit_amount,
         decision_time=intent.decision_time,
         deadline_at=intent.deadline_at,

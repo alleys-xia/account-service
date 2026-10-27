@@ -84,8 +84,13 @@ def execution(order, payload):
             superseded=False, fee_revision=payload.get("fee_revision") or 0
         )
         order["ever_filled"] = True
-    buffer = max(amount(r["fee_buffer"]) for r in eligible_reservations(order))
-    if sum((amount(r["fees"]) for r in records.values() if not r["superseded"]), ZERO) > buffer:
+    reservations = eligible_reservations(order)
+    buffer = max(amount(r["fee_buffer"]) for r in reservations)
+    signal_only = all(r.get("paper_signal_only", False) for r in reservations)
+    if (
+        not signal_only
+        and sum((amount(r["fees"]) for r in records.values() if not r["superseded"]), ZERO) > buffer
+    ):
         return "FEE_BUFFER_EXCEEDED"
     short_budgets = [
         amount(r["stock_short_budget_per_share"])

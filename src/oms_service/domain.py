@@ -1,5 +1,6 @@
 """Pure order transitions. Broker adapters and persistence stay outside this module."""
 
+from datetime import timezone
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -45,7 +46,7 @@ class Order(BaseModel):
     reason: str | None = None
 
     def view(self):
-        return self.model_dump(mode="json", exclude={"session_token", "executions", "pending"}) | {
+        return self.model_dump(mode="json", exclude={"session_token", "pending"}) | {
             "pending_stage": self.pending.get("stage") if self.pending else None,
             "pending_request_id": self.pending.get("request_id") if self.pending else None,
             "pending_operation": self.pending.get("operation") if self.pending else None,
@@ -102,6 +103,11 @@ def apply_execution(original, report, command):
             fees=str(report.fees),
             correction_of=report.correction_of,
             superseded=False,
+            executed_at=(
+                report.executed_at.astimezone(timezone.utc).isoformat()
+                if report.executed_at is not None
+                else None
+            ),
         )
         existing = order.executions.get(report.execution_id)
         if existing:
@@ -109,14 +115,25 @@ def apply_execution(original, report, command):
             if any(
                 existing[key] != fill[key]
                 for key in ("leg_id", "quantity", "price", "correction_of")
+            ) or (
+                existing.get("executed_at") is not None
+                and fill["executed_at"] is not None
+                and existing["executed_at"] != fill["executed_at"]
             ):
                 raise ProtocolError("EXECUTION_ID_CONFLICT")
-            return order, [], None
-        if report.correction_of:
+            if existing.get("executed_at") is not None or fill["executed_at"] is None:
+                return order, [], None
+            # Recovery may enrich an old fill, without changing its economic identity,
+            # fee revisions or superseded state.
+            existing["executed_at"] = fill["executed_at"]
+            fill = existing
+        elif report.correction_of:
             previous = order.executions.get(report.correction_of)
             if not previous or previous["superseded"] or previous["leg_id"] != report.leg_id:
                 raise ProtocolError("UNKNOWN_EXECUTION_CORRECTION")
             previous["superseded"] = True
+            if fill["executed_at"] is None:
+                fill["executed_at"] = previous.get("executed_at")
         order.executions[report.execution_id] = fill
         if order.status in {"REJECTED", "EXPIRED"}:
             order.consistency = "RECONCILIATION_REQUIRED"
@@ -130,7 +147,8 @@ def apply_execution(original, report, command):
                 leg_id=report.leg_id,
                 quantity=report.quantity,
                 price=report.price,
-                fees=report.fees,
+                executed_at=fill["executed_at"],
+                fees=fill["fees"],
                 correction_of=report.correction_of,
                 update_kind="CORRECTION" if report.correction_of else "FILL",
                 transport="OMS",
@@ -158,6 +176,7 @@ def apply_execution(original, report, command):
                 leg_id=fill["leg_id"],
                 quantity="0",
                 price=fill["price"],
+                executed_at=fill.get("executed_at"),
                 fees=report.fees,
                 update_kind="FEE",
                 fee_revision=report.fee_revision,

@@ -102,6 +102,7 @@ class Settings(FrozenModel):
     instruments: dict[Token, Instrument]
     stock_short_allowlist: dict[Token, tuple[Token, ...]] = {}
     paper_signal_only_allowlist: dict[Token, tuple[Token, ...]] = {}
+    paper_market_allowlist: dict[Token, tuple[Token, ...]] = {}
     extra_rules: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -113,6 +114,21 @@ class Settings(FrozenModel):
             raise ValueError("fee buffers must be nonnegative")
         if not self.strategies or not self.instruments:
             raise ValueError("explicit strategy limits and instrument catalog required")
+        if self.paper_market_allowlist and (self.mode != "IB_PAPER" or not self.require_portfolio):
+            raise ValueError(
+                "paper market admission requires IB_PAPER and Portfolio reconciliation"
+            )
+        for strategy, names in self.paper_market_allowlist.items():
+            if strategy not in self.strategies or not names or len(set(names)) != len(names):
+                raise ValueError(
+                    "paper market allowlist requires a known strategy and unique instruments"
+                )
+            for name in names:
+                ref = self.instruments.get(name)
+                if ref is None or ref.asset_type != "FUTURE" or ref.underlying != "MHI":
+                    raise ValueError(
+                        "paper market admission supports configured MHI contracts only"
+                    )
         if self.paper_signal_only_allowlist and (
             self.mode != "IB_PAPER" or not self.require_portfolio
         ):
@@ -150,6 +166,13 @@ class Settings(FrozenModel):
         return f"OMS_{self.environment}_{self.account_id}"
 
     @property
+    def recovery_allowlist(self):
+        scopes = dict(self.paper_signal_only_allowlist)
+        for strategy, names in self.paper_market_allowlist.items():
+            scopes[strategy] = scopes.get(strategy, ()) + names
+        return scopes
+
+    @property
     def policy_hash(self):
         return digest(
             self.model_dump(
@@ -164,6 +187,7 @@ class Settings(FrozenModel):
                     "instruments",
                     "stock_short_allowlist",
                     "paper_signal_only_allowlist",
+                    "paper_market_allowlist",
                     "extra_rules",
                     "max_decision_age",
                     "min_option_dte",

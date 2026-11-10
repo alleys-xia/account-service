@@ -123,7 +123,7 @@ async def run(oms_settings, risk_settings, portfolio_settings, *, stop=None):
             stores.append(store)
             await store.open()
             options = (
-                {"recovery_allowlist": risk_settings.paper_signal_only_allowlist}
+                {"recovery_allowlist": risk_settings.recovery_allowlist}
                 if service_type is Oms
                 else {}
             )

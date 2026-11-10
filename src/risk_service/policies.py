@@ -93,12 +93,16 @@ class Engine:
             return reject("POSITION_VALIDATION_REQUIRED")
         allowed_mes = s.paper_signal_only_allowlist.get(strategy_id, ())
         signal_only = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mes
+        allowed_mhi = s.paper_market_allowlist.get(strategy_id, ())
+        paper_market = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mhi
         if signal_only and intent.order_type != "MARKET":
             return reject("SIGNAL_ONLY_MARKET_REQUIRED")
-        if intent.order_type == "MARKET" and not signal_only:
+        if intent.order_type == "MARKET" and not (signal_only or paper_market):
             return reject("MARKET_NOT_AUTHORIZED")
         if signal_only and (intent.quantity != 1 or replacing):
             return reject("SIGNAL_ONLY_QUANTITY_OR_REPLACE")
+        if paper_market and intent.order_type == "MARKET" and (intent.quantity != 1 or replacing):
+            return reject("MARKET_QUANTITY_OR_REPLACE")
         for leg in intent.legs:
             if not closing and (
                 intent.structure == "SINGLE"
@@ -155,15 +159,11 @@ class Engine:
             base = expiry_loss = ZERO
             fee_buffer = ZERO
         elif intent.structure == "SINGLE":
-            if (
-                intent.net_price_effect
-                != (
-                    ("DEBIT" if intent.legs[0].side == "BUY" else "CREDIT")
-                    if future or intent.legs[0].asset_type == "STOCK"
-                    else ("CREDIT" if closing else "DEBIT")
-                )
-                or intent.limit_amount <= 0
-            ):
+            if intent.net_price_effect != (
+                ("DEBIT" if intent.legs[0].side == "BUY" else "CREDIT")
+                if future or intent.legs[0].asset_type == "STOCK"
+                else ("CREDIT" if closing else "DEBIT")
+            ) or (intent.order_type == "LIMIT" and intent.limit_amount <= 0):
                 return reject("INVALID_DEBIT")
             unit_budget = (
                 s.instruments[intent.legs[0].instrument_id].future_contract_budget

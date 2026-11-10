@@ -55,7 +55,7 @@ class Recovery:
             and intent.legs[0].instrument_id
             in (self.allowlist.get(strategy, ()) if instruments is None else instruments)
             and intent.legs[0].asset_type == "FUTURE"
-            and intent.legs[0].underlying == "MES"
+            and intent.legs[0].underlying in {"MES", "MHI"}
         )
 
     @staticmethod

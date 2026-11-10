@@ -166,7 +166,16 @@ class ExecutionReport(Scoped):
     fee_revision: int | None = Field(default=None, ge=1)
     reason: str = Field(default="", max_length=1024)
     occurred_at: AwareDatetime = Field(default_factory=utcnow)
+    # Unlike occurred_at on legacy reports, this is never a receipt-time fallback.
+    executed_at: AwareDatetime | None = None
     mode: Literal["SIMULATION", "IB_PAPER"] = "SIMULATION"
+
+    @model_serializer(mode="wrap")
+    def wire(self, handler):
+        value = handler(self)
+        if self.executed_at is None:
+            value.pop("executed_at", None)
+        return value
 
     @model_validator(mode="after")
     def fill_fields(self):

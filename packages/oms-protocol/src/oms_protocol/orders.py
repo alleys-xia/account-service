@@ -124,9 +124,9 @@ class OrderIntent(FrozenModel):
                 self.limit_amount is not None
                 or self.structure != "SINGLE"
                 or self.legs[0].asset_type != "FUTURE"
-                or self.legs[0].underlying != "MES"
+                or self.legs[0].underlying not in {"MES", "MHI"}
             ):
-                raise ValueError("MARKET requires SINGLE MES and no limit amount")
+                raise ValueError("MARKET requires SINGLE MES/MHI and no limit amount")
         elif self.limit_amount is None:
             raise ValueError("LIMIT requires a limit amount")
         if (self.price_unit == "INDEX_POINTS") != (self.legs[0].asset_type == "FUTURE"):
@@ -258,6 +258,8 @@ class ExecutionEvent(FrozenModel):
     leg_id: str
     quantity: Amount = Field(ge=0)
     price: Amount = Field(ge=0)
+    # Broker execution time only; None means legacy/unavailable, never receipt time.
+    executed_at: AwareDatetime | None = None
     fees: Amount = Field(default=Decimal("0"), ge=0)
     correction_of: str | None = None
     fee_revision: int | None = Field(default=None, ge=1)
@@ -265,6 +267,13 @@ class ExecutionEvent(FrozenModel):
     transport: Literal["MOCK", "OMS"] = "MOCK"
     feed_epoch: str = "mock-v1"
     strategy_seq: int = Field(default=1, ge=1)
+
+    @model_serializer(mode="wrap")
+    def wire(self, handler):
+        value = handler(self)
+        if self.executed_at is None:
+            value.pop("executed_at", None)
+        return value
 
 
 class ViewSnapshot(FrozenModel):

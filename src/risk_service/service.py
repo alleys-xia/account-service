@@ -218,15 +218,20 @@ class Service:
                             raise ProtocolError("INSUFFICIENT_CLOSE_QUANTITY")
                     except ProtocolError as exc:
                         reason = exc.code
+                instrument_id = request.intent.legs[0].instrument_id
+                signal_only = instrument_id in self.settings.paper_signal_only_allowlist.get(
+                    request.strategy_instance_id, ()
+                )
+                paper_market = instrument_id in self.settings.paper_market_allowlist.get(
+                    request.strategy_instance_id, ()
+                )
                 if (
                     not reason
                     and not closing
                     and request.intent.order_type == "MARKET"
-                    and request.intent.legs[0].instrument_id
-                    in self.settings.paper_signal_only_allowlist.get(
-                        request.strategy_instance_id, ()
-                    )
+                    and (signal_only or paper_market)
                 ):
+                    underlying = "MES" if signal_only else "MHI"
                     held = Decimal(0)
                     for oid, other in orders.items():
                         v = other["view"]
@@ -235,7 +240,7 @@ class Service:
                             or not v
                             or v["strategy_instance_id"] != request.strategy_instance_id
                             or v["intent"].get("close_position_id")
-                            or v["intent"]["legs"][0].get("underlying") != "MES"
+                            or v["intent"]["legs"][0].get("underlying") != underlying
                         ):
                             continue
                         held += Decimal(lots[oid]["risk_quantity"])
@@ -243,8 +248,10 @@ class Service:
                             held += max(
                                 Decimal(0), Decimal(v["intent"]["quantity"]) - min(units(v))
                             )
-                    if held + request.intent.quantity > 1:
-                        reason = "SIGNAL_ONLY_POSITION_LIMIT"
+                    if held + request.intent.quantity > (1 if signal_only else 2):
+                        reason = (
+                            "SIGNAL_ONLY_POSITION_LIMIT" if signal_only else "MARKET_POSITION_LIMIT"
+                        )
                 pending = await self.store.one(
                     "SELECT count(*) AS n FROM risk.outbox WHERE NOT published"
                 )

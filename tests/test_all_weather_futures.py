@@ -29,6 +29,7 @@ EXPIRY = date(2026, 12, 18)
 PRODUCTS = {
     "NES": ("INDEX", "CASH", "0.5", "0.5", "6000"),
     "MTN": ("RATE", "CASH", "100", "0.015625", "115"),
+    "MNG": ("COMMODITY", "CASH", "1000", "0.001", "3.65"),
     "1OZ": ("COMMODITY", "CASH", "1", "0.25", "4000"),
     "MZC": ("COMMODITY", "CASH", "5", "0.5", "450"),
     "M6E": ("CURRENCY", "PHYSICAL", "12500", "0.0001", "1.1"),
@@ -438,6 +439,7 @@ class FuturesLedgerTests(unittest.TestCase):
                 expected = {
                     "NES": "0.25",
                     "MTN": "1.5625",
+                    "MNG": "1",
                     "1OZ": "0.25",
                     "MZC": "2.5",
                     "M6E": "1.25",

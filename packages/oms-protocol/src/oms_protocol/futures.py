@@ -22,6 +22,7 @@ class FutureProduct:
     multiplier: Decimal
     tick: Decimal
     exchanges: tuple[str, ...]
+    ib_symbol: str | None = None
 
 
 FUTURES = MappingProxyType(
@@ -33,6 +34,15 @@ FUTURES = MappingProxyType(
         "MTN": FutureProduct(
             "RATE", "CASH", "USD", Decimal("100"), Decimal("0.015625"), ("CBOT", "ECBOT")
         ),
+        "MNG": FutureProduct(
+            "COMMODITY",
+            "CASH",
+            "USD",
+            Decimal("1000"),
+            Decimal("0.001"),
+            ("NYMEX",),
+            ib_symbol="MHNG",
+        ),
         "1OZ": FutureProduct("COMMODITY", "CASH", "USD", Decimal("1"), Decimal("0.25"), ("COMEX",)),
         "MZC": FutureProduct(
             "COMMODITY", "CASH", "USD", Decimal("5"), Decimal("0.5"), ("CBOT", "ECBOT")
@@ -42,9 +52,11 @@ FUTURES = MappingProxyType(
         ),
     }
 )
-ALL_WEATHER_FUTURES = frozenset({"NES", "MTN", "1OZ", "MZC", "M6E"})
+ALL_WEATHER_FUTURES = frozenset({"NES", "MTN", "MNG", "1OZ", "MZC", "M6E"})
 MARKET_FUTURES = ALL_WEATHER_FUTURES | {"MES", "MHI"}
-FUTURE_POSITION_CAPS = MappingProxyType({"NES": 1, "MTN": 1, "1OZ": 1, "MZC": 2, "M6E": 1})
+FUTURE_POSITION_CAPS = MappingProxyType(
+    {"NES": 1, "MTN": 1, "MNG": 1, "1OZ": 1, "MZC": 2, "M6E": 1}
+)
 
 
 def entry_cutoff_reason(root, cutoff, now):

@@ -4,7 +4,9 @@ from datetime import timedelta
 from decimal import Decimal
 
 from oms_protocol.common import digest, uid, utcnow
+from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURE_POSITION_CAPS
 from oms_protocol.messages import ProtocolError, RiskDecision
+from oms_protocol.orders import OrderIntent, replacement_error
 from psycopg.types.json import Jsonb
 
 from portfolio_service.lots import build_lots, units, validate_close
@@ -196,10 +198,9 @@ class Service:
                 ):
                     reason = "ORDER_NO_LONGER_RISK_PENDING"
                 if not reason and request.operation == "replace":
-                    omitted = {"limit_amount", "decision_time", "deadline_at", "quote_references"}
-                    old = {k: v for k, v in view["intent"].items() if k not in omitted}
-                    new = request.intent.model_dump(mode="json", exclude=omitted)
-                    if old != new or not active(order):
+                    if replacement_error(
+                        OrderIntent.model_validate(view["intent"]), request.intent
+                    ) or not active(order):
                         reason = "INVALID_REPLACEMENT"
                 available = None
                 if not reason and closing:
@@ -228,10 +229,13 @@ class Service:
                 if (
                     not reason
                     and not closing
-                    and request.intent.order_type == "MARKET"
+                    and (
+                        request.intent.order_type == "MARKET"
+                        or request.intent.legs[0].underlying in ALL_WEATHER_FUTURES
+                    )
                     and (signal_only or paper_market)
                 ):
-                    underlying = "MES" if signal_only else "MHI"
+                    underlying = request.intent.legs[0].underlying
                     held = Decimal(0)
                     for oid, other in orders.items():
                         v = other["view"]
@@ -248,7 +252,8 @@ class Service:
                             held += max(
                                 Decimal(0), Decimal(v["intent"]["quantity"]) - min(units(v))
                             )
-                    if held + request.intent.quantity > (1 if signal_only else 2):
+                    maximum = FUTURE_POSITION_CAPS.get(underlying, 1 if signal_only else 2)
+                    if held + request.intent.quantity > maximum:
                         reason = (
                             "SIGNAL_ONLY_POSITION_LIMIT" if signal_only else "MARKET_POSITION_LIMIT"
                         )
@@ -284,6 +289,7 @@ class Service:
                     reservation_id=uid() if assessment.approved else None,
                     approved_quantity=request.intent.quantity if assessment.approved else None,
                     approved_limit=request.intent.limit_amount if assessment.approved else None,
+                    approved_stop=request.intent.stop_amount if assessment.approved else None,
                     order_type=request.intent.order_type,
                     valid_until=min(
                         request.intent.deadline_at,

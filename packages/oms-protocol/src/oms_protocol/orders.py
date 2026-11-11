@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from .common import Identifier, Token, utcnow
+from .futures import FUTURES, MARKET_FUTURES, UnderlyingType
 
 
 def decimal_input(value):
@@ -44,13 +45,15 @@ class OrderLeg(FrozenModel):
     expiry: date | None = None
     right: Literal["CALL", "PUT"] | None = None
     strike: Amount | None = Field(default=None, gt=0)
-    underlying_type: Literal["EQUITY", "INDEX"] = "EQUITY"
+    underlying_type: UnderlyingType = "EQUITY"
     settlement: Literal["PHYSICAL", "CASH"] = "PHYSICAL"
     exercise_style: Literal["AMERICAN", "EUROPEAN"] = "AMERICAN"
 
     @model_validator(mode="after")
     def valid_instrument(self):
         if self.asset_type == "OPTION":
+            if self.underlying_type not in {"EQUITY", "INDEX"}:
+                raise ValueError("options require EQUITY or INDEX underlying type")
             if (self.settlement, self.exercise_style) != (
                 ("CASH", "EUROPEAN")
                 if self.underlying_type == "INDEX"
@@ -62,17 +65,18 @@ class OrderLeg(FrozenModel):
             ):
                 raise ValueError("option requires option metadata and CONTRACTS unit")
         elif self.asset_type == "FUTURE":
+            product = FUTURES.get(self.underlying)
             if (
                 self.quantity_unit != "CONTRACTS"
-                or self.underlying not in {"HSI", "MHI", "MES"}
+                or product is None
                 or self.expiry is None
-                or self.underlying_type != "INDEX"
-                or self.settlement != "CASH"
+                or (self.underlying_type, self.settlement)
+                != (product.underlying_type, product.settlement)
                 or self.right is not None
                 or self.strike is not None
             ):
                 raise ValueError(
-                    "future requires an actual HSI/MHI/MES expiry and INDEX/CASH metadata"
+                    "future requires a supported product, actual expiry and matching economics"
                 )
         elif self.quantity_unit != "SHARES":
             raise ValueError("stock requires SHARES unit")
@@ -84,8 +88,9 @@ class OrderIntent(FrozenModel):
     close_position_id: Identifier | None = None
     legs: tuple[OrderLeg, ...] = Field(min_length=1, max_length=2)
     quantity: Amount = Field(gt=0)
-    order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
+    order_type: Literal["LIMIT", "MARKET", "STOP"] = "LIMIT"
     limit_amount: Amount | None = Field(default=None, ge=0)
+    stop_amount: Amount | None = Field(default=None, gt=0)
     currency: Literal["USD", "HKD"] = "USD"
     price_unit: Literal["PER_SHARE_OR_COMBO_UNIT", "INDEX_POINTS"] = "PER_SHARE_OR_COMBO_UNIT"
     net_price_effect: Literal["DEBIT", "CREDIT"] = "DEBIT"
@@ -100,6 +105,8 @@ class OrderIntent(FrozenModel):
         # Preserve canonical hashes of existing OPEN intents and nested commands.
         if self.close_position_id is None:
             value.pop("close_position_id", None)
+        if self.stop_amount is None:
+            value.pop("stop_amount", None)
         return value
 
     @model_validator(mode="after")
@@ -118,15 +125,28 @@ class OrderIntent(FrozenModel):
             != ("HKD" if x.asset_type == "FUTURE" and x.underlying in {"HSI", "MHI"} else "USD")
             for x in self.legs
         ):
-            raise ValueError("HSI/MHI require HKD; MES and US stocks/options require USD")
+            raise ValueError("HSI/MHI require HKD; US futures/stocks/options require USD")
+        if self.order_type != "STOP" and self.stop_amount is not None:
+            raise ValueError("only STOP can specify a stop amount")
         if self.order_type == "MARKET":
             if (
                 self.limit_amount is not None
                 or self.structure != "SINGLE"
                 or self.legs[0].asset_type != "FUTURE"
-                or self.legs[0].underlying not in {"MES", "MHI"}
+                or self.legs[0].underlying not in MARKET_FUTURES
             ):
-                raise ValueError("MARKET requires SINGLE MES/MHI and no limit amount")
+                raise ValueError("MARKET requires a supported SINGLE future and no limit amount")
+        elif self.order_type == "STOP":
+            if (
+                not closing
+                or self.structure != "SINGLE"
+                or self.legs[0].asset_type != "FUTURE"
+                or self.legs[0].underlying not in MARKET_FUTURES
+                or self.stop_amount is None
+                or self.limit_amount is not None
+                or self.time_in_force != "GTC"
+            ):
+                raise ValueError("STOP requires a GTC SINGLE future close and only a stop amount")
         elif self.limit_amount is None:
             raise ValueError("LIMIT requires a limit amount")
         if (self.price_unit == "INDEX_POINTS") != (self.legs[0].asset_type == "FUTURE"):
@@ -212,6 +232,19 @@ class OrderIntent(FrozenModel):
             price_unit=opening.price_unit,
             **kwargs,
         )
+
+
+def replacement_error(old: OrderIntent, new: OrderIntent):
+    """Only the price may change; protective stops must never loosen."""
+    omitted = {"limit_amount", "stop_amount", "decision_time", "deadline_at", "quote_references"}
+    if old.model_dump(exclude=omitted) != new.model_dump(exclude=omitted):
+        return "REPLACE_PRICE_ONLY"
+    if old.order_type == "STOP" and (
+        (old.legs[0].side == "SELL" and new.stop_amount < old.stop_amount)
+        or (old.legs[0].side == "BUY" and new.stop_amount > old.stop_amount)
+    ):
+        return "STOP_WOULD_LOOSEN"
+    return None
 
 
 class CommandHandle(FrozenModel):

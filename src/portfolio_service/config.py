@@ -5,6 +5,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from oms_protocol.common import Token
+from oms_protocol.futures import FUTURES
 from oms_protocol.orders import Amount, FrozenModel
 from pydantic import Field, SecretStr, model_validator
 
@@ -14,13 +15,24 @@ class Instrument(FrozenModel):
     version: int = Field(default=1, ge=1)
     multiplier: Amount = Field(gt=0)
     currency: Literal["USD", "HKD"] = "USD"
+    underlying: str | None = None
 
     @model_validator(mode="after")
     def standard(self):
         if self.asset_type == "FUTURE":
-            if (self.currency, self.multiplier) not in {("HKD", 10), ("HKD", 50), ("USD", 5)}:
+            product = FUTURES.get(self.underlying)
+            if (
+                self.underlying is not None
+                and (
+                    product is None
+                    or (self.currency, self.multiplier) != (product.currency, product.multiplier)
+                )
+            ) or (
+                self.underlying is None
+                and (self.currency, self.multiplier) not in {("HKD", 10), ("HKD", 50), ("USD", 5)}
+            ):
                 raise ValueError(
-                    "supported futures require HKD multiplier 10/50 or MES USD multiplier 5"
+                    "futures require an approved product and matching currency/multiplier"
                 )
             return self
         if self.currency != "USD" or self.multiplier != (1 if self.asset_type == "STOCK" else 100):

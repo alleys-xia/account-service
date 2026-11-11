@@ -6,6 +6,12 @@ from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from oms_protocol.futures import (
+    ALL_WEATHER_FUTURES,
+    FUTURE_POSITION_CAPS,
+    FUTURES,
+    entry_cutoff_reason,
+)
 from oms_protocol.orders import STOCK_SHORT_BUDGET_FACTOR, OrderIntent
 
 from .config import Settings
@@ -95,13 +101,23 @@ class Engine:
         signal_only = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mes
         allowed_mhi = s.paper_market_allowlist.get(strategy_id, ())
         paper_market = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mhi
+        all_weather = future and intent.legs[0].underlying in ALL_WEATHER_FUTURES
+        if all_weather and not paper_market:
+            return reject("FUTURE_NOT_AUTHORIZED")
+        if intent.order_type == "STOP" and not (all_weather and paper_market):
+            return reject("STOP_NOT_AUTHORIZED")
         if signal_only and intent.order_type != "MARKET":
             return reject("SIGNAL_ONLY_MARKET_REQUIRED")
         if intent.order_type == "MARKET" and not (signal_only or paper_market):
             return reject("MARKET_NOT_AUTHORIZED")
         if signal_only and (intent.quantity != 1 or replacing):
             return reject("SIGNAL_ONLY_QUANTITY_OR_REPLACE")
-        if paper_market and intent.order_type == "MARKET" and (intent.quantity != 1 or replacing):
+        market_cap = FUTURE_POSITION_CAPS.get(intent.legs[0].underlying, 1)
+        if (
+            paper_market
+            and intent.order_type == "MARKET"
+            and (intent.quantity > market_cap or replacing)
+        ):
             return reject("MARKET_QUANTITY_OR_REPLACE")
         for leg in intent.legs:
             if not closing and (
@@ -129,12 +145,25 @@ class Engine:
                     for name in ("underlying", "expiry", "underlying_type", "settlement")
                 ):
                     return reject("INSTRUMENT_MISMATCH")
-                zone = "America/New_York" if reference.underlying == "MES" else "Asia/Hong_Kong"
+                zone = (
+                    "Asia/Hong_Kong"
+                    if reference.currency == "HKD"
+                    else "America/New_York"
+                    if reference.underlying == "MES"
+                    else "America/Chicago"
+                )
                 dte = (reference.expiry - now.astimezone(ZoneInfo(zone)).date()).days
                 if dte < (0 if closing else s.min_future_dte):
                     return reject("FUTURE_EXPIRY_TOO_CLOSE")
-                tick = Decimal("0.25") if reference.underlying == "MES" else Decimal(1)
-                if intent.limit_amount is not None and intent.limit_amount % tick:
+                if not closing:
+                    reason = entry_cutoff_reason(
+                        reference.underlying, reference.entry_cutoff_at, now
+                    )
+                    if reason:
+                        return reject(reason)
+                tick = FUTURES[reference.underlying].tick
+                price = intent.stop_amount if intent.order_type == "STOP" else intent.limit_amount
+                if price is not None and price % tick:
                     return reject("INVALID_FUTURE_TICK")
             if leg.asset_type == "OPTION":
                 if any(

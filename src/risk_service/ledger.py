@@ -129,7 +129,7 @@ def project(order, payload):
     if not view:
         return None
     previous = order["view"]
-    omitted = {"limit_amount", "decision_time", "deadline_at", "quote_references"}
+    omitted = {"limit_amount", "stop_amount", "decision_time", "deadline_at", "quote_references"}
     if previous and (
         view["strategy_instance_id"] != previous["strategy_instance_id"]
         or view["revision"] < previous["revision"]

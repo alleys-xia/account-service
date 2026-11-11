@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURES
 from oms_protocol.messages import ProtocolError
 
 
@@ -23,10 +24,24 @@ def fold(records):
             row.get("asset_type", "OPTION" if amount(row["multiplier"]) == 100 else "STOCK"),
             row.get("currency", "USD"),
         )
+        product = FUTURES.get(row.get("underlying"))
         if (
             current[0] == "FUTURE"
-            and (current[1], amount(row["multiplier"]))
-            not in {("HKD", 10), ("HKD", 50), ("USD", 5)}
+            and (
+                (
+                    row.get("underlying") is not None
+                    and (
+                        product is None
+                        or (current[1], amount(row["multiplier"]))
+                        != (product.currency, product.multiplier)
+                    )
+                )
+                or (
+                    row.get("underlying") is None
+                    and (current[1], amount(row["multiplier"]))
+                    not in {("HKD", 10), ("HKD", 50), ("USD", 5)}
+                )
+            )
         ) or (current[0] != "FUTURE" and current[1] != "USD"):
             raise ProtocolError("INVALID_LEDGER_ASSET_CURRENCY")
         if identity is not None and current != identity:
@@ -92,10 +107,17 @@ def record(payload, order, seq, reference):
     ):
         raise ProtocolError("INSTRUMENT_CATALOG_MISMATCH")
     factor = reference.multiplier
-    if leg["asset_type"] not in {"STOCK", "OPTION", "FUTURE"} or factor not in (
-        ({5} if reference.currency == "USD" else {10, 50})
-        if leg["asset_type"] == "FUTURE"
-        else {1 if leg["asset_type"] == "STOCK" else 100}
+    if leg["asset_type"] == "FUTURE":
+        product = FUTURES.get(leg.get("underlying"))
+        if (
+            product is None
+            or (reference.currency, factor) != (product.currency, product.multiplier)
+            or (reference.underlying is not None and reference.underlying != leg["underlying"])
+            or (leg["underlying"] in ALL_WEATHER_FUTURES and reference.underlying is None)
+        ):
+            raise ProtocolError("UNSUPPORTED_INSTRUMENT")
+    elif leg["asset_type"] not in {"STOCK", "OPTION"} or factor != (
+        1 if leg["asset_type"] == "STOCK" else 100
     ):
         raise ProtocolError("UNSUPPORTED_INSTRUMENT")
     return dict(
@@ -105,7 +127,15 @@ def record(payload, order, seq, reference):
         instrument_version=leg["instrument_version"],
         side=leg["side"],
         **(
-            {"asset_type": "FUTURE", "currency": reference.currency}
+            {
+                "asset_type": "FUTURE",
+                "currency": reference.currency,
+                **(
+                    {"underlying": leg["underlying"]}
+                    if leg["underlying"] in ALL_WEATHER_FUTURES
+                    else {}
+                ),
+            }
             if leg["asset_type"] == "FUTURE"
             else {}
         ),

@@ -77,7 +77,8 @@ class RiskDecision(Scoped):
     reservation_id: Identifier | None = None
     approved_quantity: Amount | None = Field(default=None, gt=0)
     approved_limit: Amount | None = Field(default=None, ge=0)
-    order_type: Literal["LIMIT", "MARKET"] = "LIMIT"
+    approved_stop: Amount | None = Field(default=None, gt=0)
+    order_type: Literal["LIMIT", "MARKET", "STOP"] = "LIMIT"
     valid_until: AwareDatetime
     applied_account_seq: int = Field(ge=0)
     reason: str = Field(default="", max_length=1024)
@@ -89,7 +90,9 @@ class RiskDecision(Scoped):
             raise ValueError("approval requires reservation and explicit bounds")
         if self.approved and (
             (self.order_type == "LIMIT" and self.approved_limit is None)
-            or (self.order_type == "MARKET" and self.approved_limit is not None)
+            or (self.order_type != "LIMIT" and self.approved_limit is not None)
+            or (self.order_type == "STOP" and self.approved_stop is None)
+            or (self.order_type != "STOP" and self.approved_stop is not None)
         ):
             raise ValueError("approval price bound must match order type")
         return self
@@ -99,6 +102,8 @@ class RiskDecision(Scoped):
         value = handler(self)
         if self.order_type == "LIMIT":
             value.pop("order_type", None)
+        if self.approved_stop is None:
+            value.pop("approved_stop", None)
         return value
 
 

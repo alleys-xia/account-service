@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from oms_protocol.common import digest
 from oms_protocol.messages import ProtocolError
-from oms_protocol.orders import ExecutionEvent, OrderIntent
+from oms_protocol.orders import ExecutionEvent, OrderIntent, replacement_error
 from pydantic import BaseModel, ConfigDict, Field
 
 TERMINAL = {"FILLED", "CANCELLED", "REJECTED", "EXPIRED"}
@@ -60,9 +60,9 @@ def intent_hash(intent):
 
 def validate_replacement(old, new):
     # New timing and quote references audit the new decision; economically only price may change.
-    omitted = {"limit_amount", "decision_time", "deadline_at", "quote_references"}
-    if old.model_dump(exclude=omitted) != new.model_dump(exclude=omitted):
-        raise ProtocolError("REPLACE_PRICE_ONLY")
+    reason = replacement_error(old, new)
+    if reason:
+        raise ProtocolError(reason)
 
 
 def _totals(order, *, corrected=False):

@@ -9,8 +9,9 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from oms_protocol.common import Token, digest
+from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURES, UnderlyingType
 from oms_protocol.orders import Amount, FrozenModel
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AwareDatetime, Field, SecretStr, model_validator
 
 
 class Limits(FrozenModel):
@@ -30,12 +31,14 @@ class Instrument(FrozenModel):
     multiplier: Amount = Field(gt=0)
     currency: Literal["USD", "HKD"] = "USD"
     future_contract_budget: Amount | None = Field(default=None, gt=0)
+    price_increment: Amount | None = Field(default=None, gt=0)
+    entry_cutoff_at: AwareDatetime | None = None
     stock_short_budget_per_share: Amount | None = Field(default=None, gt=0)
     underlying: str | None = None
     expiry: date | None = None
     right: Literal["CALL", "PUT"] | None = None
     strike: Amount | None = Field(default=None, gt=0)
-    underlying_type: Literal["EQUITY", "INDEX"] = "EQUITY"
+    underlying_type: UnderlyingType = "EQUITY"
     settlement: Literal["PHYSICAL", "CASH"] = "PHYSICAL"
     exercise_style: Literal["AMERICAN", "EUROPEAN"] = "AMERICAN"
     standard: Literal[True] = True
@@ -50,24 +53,35 @@ class Instrument(FrozenModel):
             ):
                 raise ValueError("stock requires multiplier 1 and no option fields")
         elif self.asset_type == "FUTURE":
+            product = FUTURES.get(self.underlying)
             if (
-                self.underlying not in {"HSI", "MHI", "MES"}
-                or self.currency != ("USD" if self.underlying == "MES" else "HKD")
-                or self.multiplier != {"HSI": 50, "MHI": 10, "MES": 5}.get(self.underlying)
+                product is None
+                or self.currency != product.currency
+                or self.multiplier != product.multiplier
                 or (self.underlying != "MES" and self.future_contract_budget is None)
                 or self.expiry is None
                 or self.right is not None
                 or self.strike is not None
-                or self.underlying_type != "INDEX"
-                or self.settlement != "CASH"
+                or self.underlying_type != product.underlying_type
+                or self.settlement != product.settlement
+                or (self.price_increment is not None and self.price_increment != product.tick)
+                or (self.underlying in ALL_WEATHER_FUTURES and self.price_increment is None)
             ):
-                raise ValueError("invalid supported index futures catalog entry")
+                raise ValueError("invalid supported futures catalog entry")
+            if self.entry_cutoff_at is not None and self.entry_cutoff_at.date() >= self.expiry:
+                raise ValueError("entry cutoff must precede expiry date")
         elif self.multiplier != 100 or any(
             x is None for x in (self.underlying, self.expiry, self.right, self.strike)
         ):
             raise ValueError("v1 supports configured standard multiplier-100 US options only")
-        if self.asset_type == "OPTION" and (self.settlement, self.exercise_style) != (
-            ("CASH", "EUROPEAN") if self.underlying_type == "INDEX" else ("PHYSICAL", "AMERICAN")
+        if self.asset_type == "OPTION" and (
+            self.underlying_type not in {"EQUITY", "INDEX"}
+            or (self.settlement, self.exercise_style)
+            != (
+                ("CASH", "EUROPEAN")
+                if self.underlying_type == "INDEX"
+                else ("PHYSICAL", "AMERICAN")
+            )
         ):
             raise ValueError("unsupported option settlement/exercise combination")
         if self.asset_type != "FUTURE" and (
@@ -125,9 +139,13 @@ class Settings(FrozenModel):
                 )
             for name in names:
                 ref = self.instruments.get(name)
-                if ref is None or ref.asset_type != "FUTURE" or ref.underlying != "MHI":
+                if (
+                    ref is None
+                    or ref.asset_type != "FUTURE"
+                    or ref.underlying not in ALL_WEATHER_FUTURES | {"MHI"}
+                ):
                     raise ValueError(
-                        "paper market admission supports configured MHI contracts only"
+                        "paper market admission requires a supported explicit futures contract"
                     )
         if self.paper_signal_only_allowlist and (
             self.mode != "IB_PAPER" or not self.require_portfolio

@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from nats.errors import Error as NatsError
 from oms_protocol.common import uid, utcnow
+from oms_protocol.futures import FUTURE_POSITION_CAPS, MARKET_FUTURES
 from oms_protocol.messages import OrderCommand, ProtocolError
 from oms_protocol.orders import OrderIntent
 from psycopg.types.json import Jsonb
@@ -55,7 +56,7 @@ class Recovery:
             and intent.legs[0].instrument_id
             in (self.allowlist.get(strategy, ()) if instruments is None else instruments)
             and intent.legs[0].asset_type == "FUTURE"
-            and intent.legs[0].underlying in {"MES", "MHI"}
+            and intent.legs[0].underlying in MARKET_FUTURES
         )
 
     @staticmethod
@@ -257,7 +258,14 @@ class Recovery:
                 if self.scoped(strategy, order.intent)
             ]
             openings = [order for order in orders if not order.intent.close_position_id]
-            working = [order for order in openings if order.status not in TERMINAL]
+            # Owner-loss liquidation must retire broker-native protection first.
+            # REQUESTED is not proof: only terminal, reconciled cancellations release holds.
+            working = [
+                order
+                for order in orders
+                if order.status not in TERMINAL
+                and (order in openings or order.intent.order_type == "STOP")
+            ]
             if working:
                 for order in working:
                     if (
@@ -328,7 +336,13 @@ class Recovery:
                 if order.intent.close_position_id and order.status not in TERMINAL
             ]
             for key, lot in owned.items():
-                if lot["state"] != "SETTLED" or Decimal(lot["remaining_quantity"]) != 1:
+                maximum = FUTURE_POSITION_CAPS.get(
+                    lot["opening_intent"]["legs"][0]["underlying"], 1
+                )
+                if (
+                    lot["state"] != "SETTLED"
+                    or not 0 < Decimal(lot["remaining_quantity"]) <= maximum
+                ):
                     await self.reason(strategy, value, "WAITING_LOT_RECONCILIATION")
                     return None
                 if any(order.intent.close_position_id == key for order in closing):

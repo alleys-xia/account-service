@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 [project]
 name = "account-service"
-version = "0.6.0"
+version = "0.7.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["portfolio-client==0.6.0", "oms-protocol==0.7.0", "oms-client==0.7.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
+dependencies = ["portfolio-client==0.7.0", "oms-protocol==0.8.0", "oms-client==0.8.0", "nats-py>=2.10,<3", "psycopg[binary]>=3.2,<4", "pydantic>=2.11,<3"]
 [project.scripts]
 account-runtime = "account_runtime.app:main"
 risk = "risk_service.app:main"

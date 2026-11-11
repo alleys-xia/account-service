@@ -4,7 +4,7 @@ requires-python = "==3.11.*"
 
 [[package]]
 name = "account-service"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "nats-py" },
@@ -53,7 +53,7 @@ wheels = [
 
 [[package]]
 name = "oms-client"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "packages/oms-client" }
 dependencies = [
     { name = "nats-py" },
@@ -63,12 +63,12 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
-    { name = "oms-protocol", specifier = "==0.7.0" },
+    { name = "oms-protocol", specifier = "==0.8.0" },
 ]
 
 [[package]]
 name = "oms-protocol"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "packages/oms-protocol" }
 dependencies = [
     { name = "pydantic" },
@@ -79,7 +79,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
 
 [[package]]
 name = "portfolio-client"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/portfolio-client" }
 dependencies = [
     { name = "nats-py" },
@@ -90,7 +90,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "nats-py", specifier = ">=2.10,<3" },
-    { name = "oms-protocol", specifier = "==0.7.0" },
+    { name = "oms-protocol", specifier = "==0.8.0" },
     { name = "pydantic", specifier = ">=2.11,<3" },
 ]
 

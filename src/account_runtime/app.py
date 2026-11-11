@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from oms_protocol.common import utcnow
+from oms_protocol.futures import ALL_WEATHER_FUTURES
 from oms_protocol.messages import ProtocolError
 
 _LOG_EVENTS = {
@@ -78,7 +79,14 @@ def validate_domains(settings):
 
     def catalog(values):
         return {
-            name: (v.asset_type, v.version, v.multiplier, v.currency) for name, v in values.items()
+            name: (
+                v.asset_type,
+                v.version,
+                v.multiplier,
+                v.currency,
+                v.underlying if v.underlying in ALL_WEATHER_FUTURES else None,
+            )
+            for name, v in values.items()
         }
 
     if catalog(risk.instruments) != catalog(portfolio.instruments):

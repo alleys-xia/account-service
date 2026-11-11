@@ -344,6 +344,7 @@ class Service:
                     elif (
                         decision.approved_quantity != request.intent.quantity
                         or decision.approved_limit != request.intent.limit_amount
+                        or decision.approved_stop != request.intent.stop_amount
                         or decision.order_type != request.intent.order_type
                     ):
                         raise ProtocolError("RISK_APPROVED_BOUNDS_MISMATCH")

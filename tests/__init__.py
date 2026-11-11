@@ -1,1 +1,0 @@
-"""Account-service regression tests."""

@@ -9,6 +9,7 @@ from oms_protocol.orders import OrderIntent, ViewSnapshot
 from portfolio_client.models import BrokerSnapshot
 from pydantic import ValidationError
 
+from portfolio_service.lots import build_lots, validate_close
 from portfolio_service.service import Service
 from risk_service.config import Settings
 from risk_service.policies import Engine, Usage
@@ -81,6 +82,19 @@ class StockMarketTests(TestCase):
             market_budget_amount="1000",
         )
         self.assertEqual(self.assess(order).reason, "POSITION_VALIDATION_REQUIRED")
+        opening_view = dict(
+            order_id="owned-lot",
+            strategy_instance_id="alpha",
+            consistency="CONSISTENT",
+            intent=intent().model_dump(mode="json"),
+            filled={"XYZ": "10"},
+        )
+        lot = build_lots([opening_view])["owned-lot"]
+        validate_close(order, "alpha", lot)
+        close_view = opening_view | {"order_id": "close", "intent": order.model_dump(mode="json")}
+        self.assertEqual(
+            build_lots([opening_view, close_view])["owned-lot"]["remaining_quantity"], "0"
+        )
         result = self.assess(order, reduce_only=True)
         self.assertTrue(result.approved)
         self.assertEqual(result.cost, 0)

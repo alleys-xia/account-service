@@ -117,6 +117,7 @@ class Settings(FrozenModel):
     stock_short_allowlist: dict[Token, tuple[Token, ...]] = {}
     paper_signal_only_allowlist: dict[Token, tuple[Token, ...]] = {}
     paper_market_allowlist: dict[Token, tuple[Token, ...]] = {}
+    paper_stock_market_allowlist: dict[Token, tuple[Token, ...]] = {}
     extra_rules: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -147,6 +148,21 @@ class Settings(FrozenModel):
                     raise ValueError(
                         "paper market admission requires a supported explicit futures contract"
                     )
+        if self.paper_stock_market_allowlist and (
+            self.mode != "IB_PAPER" or not self.require_portfolio
+        ):
+            raise ValueError(
+                "paper stock market admission requires IB_PAPER and Portfolio reconciliation"
+            )
+        for strategy, names in self.paper_stock_market_allowlist.items():
+            if strategy not in self.strategies or not names or len(set(names)) != len(names):
+                raise ValueError(
+                    "paper stock market allowlist requires a known strategy and unique instruments"
+                )
+            for name in names:
+                ref = self.instruments.get(name)
+                if ref is None or ref.asset_type != "STOCK":
+                    raise ValueError("paper stock market admission requires a USD stock catalog entry")
         if self.paper_signal_only_allowlist and (
             self.mode != "IB_PAPER" or not self.require_portfolio
         ):
@@ -206,6 +222,7 @@ class Settings(FrozenModel):
                     "stock_short_allowlist",
                     "paper_signal_only_allowlist",
                     "paper_market_allowlist",
+                    "paper_stock_market_allowlist",
                     "extra_rules",
                     "max_decision_age",
                     "min_option_dte",

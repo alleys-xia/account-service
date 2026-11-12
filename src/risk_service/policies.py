@@ -108,7 +108,14 @@ class Engine:
             return reject("STOP_NOT_AUTHORIZED")
         if signal_only and intent.order_type != "MARKET":
             return reject("SIGNAL_ONLY_MARKET_REQUIRED")
-        if intent.order_type == "MARKET" and not (signal_only or paper_market):
+        stock_market = intent.is_stock_market
+        if stock_market:
+            allowed_stocks = s.paper_stock_market_allowlist.get(strategy_id, ())
+            if s.mode != "IB_PAPER" or intent.legs[0].instrument_id not in allowed_stocks:
+                return reject("MARKET_NOT_AUTHORIZED")
+            if replacing:
+                return reject("MARKET_QUANTITY_OR_REPLACE")
+        elif intent.order_type == "MARKET" and not (signal_only or paper_market):
             return reject("MARKET_NOT_AUTHORIZED")
         if signal_only and (intent.quantity != 1 or replacing):
             return reject("SIGNAL_ONLY_QUANTITY_OR_REPLACE")
@@ -187,6 +194,9 @@ class Engine:
         if signal_only:
             base = expiry_loss = ZERO
             fee_buffer = ZERO
+        elif stock_market:
+            base = intent.market_budget_amount
+            expiry_loss = None
         elif intent.structure == "SINGLE":
             if intent.net_price_effect != (
                 ("DEBIT" if intent.legs[0].side == "BUY" else "CREDIT")
@@ -271,6 +281,8 @@ class Engine:
                 if signal_only
                 else "FUTURES_CONTRACT_BUDGET"
                 if future
+                else "STOCK_MARKET_NOTIONAL_BUDGET"
+                if stock_market
                 else "STOCK_SHORT_NOTIONAL_BUDGET"
                 if stock_short
                 else "EXPIRY_MAX_LOSS"

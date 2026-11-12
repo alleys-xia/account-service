@@ -1,6 +1,6 @@
 """Typed intent/report contracts. These do not qualify contracts or route orders."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -91,6 +91,11 @@ class OrderIntent(FrozenModel):
     order_type: Literal["LIMIT", "MARKET", "STOP"] = "LIMIT"
     limit_amount: Amount | None = Field(default=None, ge=0)
     stop_amount: Amount | None = Field(default=None, gt=0)
+    market_reference_price: Amount | None = Field(default=None, gt=0)
+    market_reference_at: AwareDatetime | None = None
+    # Fee-exclusive notional for Risk. A MARKET order has no execution price cap.
+    market_budget_amount: Amount | None = Field(default=None, gt=0)
+    rth_only: bool | None = None
     currency: Literal["USD", "HKD"] = "USD"
     price_unit: Literal["PER_SHARE_OR_COMBO_UNIT", "INDEX_POINTS"] = "PER_SHARE_OR_COMBO_UNIT"
     net_price_effect: Literal["DEBIT", "CREDIT"] = "DEBIT"
@@ -107,6 +112,11 @@ class OrderIntent(FrozenModel):
             value.pop("close_position_id", None)
         if self.stop_amount is None:
             value.pop("stop_amount", None)
+        for field in (
+            "market_reference_price", "market_reference_at", "market_budget_amount", "rth_only",
+        ):
+            if getattr(self, field) is None:
+                value.pop(field, None)
         return value
 
     @model_validator(mode="after")
@@ -128,14 +138,36 @@ class OrderIntent(FrozenModel):
             raise ValueError("HSI/MHI require HKD; US futures/stocks/options require USD")
         if self.order_type != "STOP" and self.stop_amount is not None:
             raise ValueError("only STOP can specify a stop amount")
+        leg = self.legs[0]
+        if not self.is_stock_market and any(
+            value is not None
+            for value in (
+                self.market_reference_price, self.market_reference_at, self.market_budget_amount,
+            )
+        ):
+            raise ValueError("market reference and budget apply only to stock MARKET orders")
         if self.order_type == "MARKET":
-            if (
-                self.limit_amount is not None
-                or self.structure != "SINGLE"
-                or self.legs[0].asset_type != "FUTURE"
-                or self.legs[0].underlying not in MARKET_FUTURES
-            ):
-                raise ValueError("MARKET requires a supported SINGLE future and no limit amount")
+            if self.limit_amount is not None or self.structure != "SINGLE":
+                raise ValueError("MARKET requires SINGLE and no limit amount")
+            if self.is_stock_market:
+                if (
+                    leg.metadata_status != "VERIFIED"
+                    or leg.side != ("SELL" if closing else "BUY")
+                    or self.rth_only is not True
+                    or self.time_in_force != "DAY"
+                ):
+                    raise ValueError("stock MARKET requires a verified RTH DAY long open or close")
+                if (
+                    self.market_reference_price is None
+                    or self.market_budget_amount is None
+                    or self.market_budget_amount < self.market_reference_price * self.quantity
+                    or self.market_reference_at is None
+                    or self.market_reference_at > self.decision_time
+                    or self.deadline_at > self.market_reference_at + timedelta(seconds=5)
+                ):
+                    raise ValueError("stock MARKET requires fresh reference and covering budget")
+            elif leg.asset_type != "FUTURE" or leg.underlying not in MARKET_FUTURES:
+                raise ValueError("MARKET requires a supported stock or future")
         elif self.order_type == "STOP":
             if (
                 not closing
@@ -192,6 +224,10 @@ class OrderIntent(FrozenModel):
         return cls(
             structure="VERTICAL_CREDIT", legs=(short, long), net_price_effect="CREDIT", **kwargs
         )
+
+    @property
+    def is_stock_market(self):
+        return self.order_type == "MARKET" and self.legs[0].asset_type == "STOCK"
 
     @property
     def is_stock_short_open(self):
@@ -309,6 +345,13 @@ class ExecutionEvent(FrozenModel):
         return value
 
 
+class USDCashSnapshot(FrozenModel):
+    amount: Amount
+    started_at: AwareDatetime
+    completed_at: AwareDatetime
+    snapshot_id: Token
+
+
 class ViewSnapshot(FrozenModel):
     status: Literal["AVAILABLE", "UNAVAILABLE"]
     items: tuple[dict[str, Any], ...] = ()
@@ -321,6 +364,14 @@ class ViewSnapshot(FrozenModel):
     execution_session: str | None = None
     reconciliation_status: str = "UNAVAILABLE"
     reason: str | None = None
+    usd_cash: USDCashSnapshot | None = None
+
+    @model_serializer(mode="wrap")
+    def wire(self, handler):
+        value = handler(self)
+        if self.usd_cash is None:
+            value.pop("usd_cash", None)
+        return value
 
 
 class PositionUpdate(FrozenModel):

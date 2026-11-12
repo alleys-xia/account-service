@@ -269,6 +269,21 @@ class Service:
                 reconciliation_status=status,
                 reason=blocked or broker_error,
             )
+            if epoch and status == "POSITIONS_MATCHED":
+                source = broker["snapshot"]
+                usd = {
+                    row["tag"]: row["value"]
+                    for row in source["account_values"]
+                    if row["currency"] == "USD"
+                }
+                cash = usd.get("$LEDGER-CashBalance", usd.get("$LEDGER-TotalCashBalance"))
+                if cash is not None:
+                    snapshot["usd_cash"] = dict(
+                        amount=cash,
+                        started_at=source["started_at"],
+                        completed_at=source["completed_at"],
+                        snapshot_id=source["snapshot_id"],
+                    )
             result = dict(
                 mode=self.settings.mode,
                 account_id=self.settings.account_id,

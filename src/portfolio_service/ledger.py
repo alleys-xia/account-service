@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURES
+from oms_protocol.futures import FUTURES, RESTRICTED_FUTURES
 from oms_protocol.messages import ProtocolError
 
 
@@ -113,7 +113,7 @@ def record(payload, order, seq, reference):
             product is None
             or (reference.currency, factor) != (product.currency, product.multiplier)
             or (reference.underlying is not None and reference.underlying != leg["underlying"])
-            or (leg["underlying"] in ALL_WEATHER_FUTURES and reference.underlying is None)
+            or (leg["underlying"] in RESTRICTED_FUTURES and reference.underlying is None)
         ):
             raise ProtocolError("UNSUPPORTED_INSTRUMENT")
     elif leg["asset_type"] not in {"STOCK", "OPTION"} or factor != (
@@ -132,7 +132,7 @@ def record(payload, order, seq, reference):
                 "currency": reference.currency,
                 **(
                     {"underlying": leg["underlying"]}
-                    if leg["underlying"] in ALL_WEATHER_FUTURES
+                    if leg["underlying"] in RESTRICTED_FUTURES
                     else {}
                 ),
             }

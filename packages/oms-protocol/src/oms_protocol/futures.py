@@ -52,8 +52,8 @@ FUTURES = MappingProxyType(
         ),
     }
 )
-ALL_WEATHER_FUTURES = frozenset({"NES", "MTN", "MNG", "1OZ", "MZC", "M6E"})
-MARKET_FUTURES = ALL_WEATHER_FUTURES | {"MES", "MHI"}
+RESTRICTED_FUTURES = frozenset({"NES", "MTN", "MNG", "1OZ", "MZC", "M6E"})
+MARKET_FUTURES = RESTRICTED_FUTURES | {"MES", "MHI"}
 FUTURE_POSITION_CAPS = MappingProxyType(
     {"NES": 1, "MTN": 1, "MNG": 1, "1OZ": 1, "MZC": 2, "M6E": 1}
 )

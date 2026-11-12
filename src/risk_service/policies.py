@@ -7,9 +7,9 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from oms_protocol.futures import (
-    ALL_WEATHER_FUTURES,
     FUTURE_POSITION_CAPS,
     FUTURES,
+    RESTRICTED_FUTURES,
     entry_cutoff_reason,
 )
 from oms_protocol.orders import STOCK_SHORT_BUDGET_FACTOR, OrderIntent
@@ -101,10 +101,10 @@ class Engine:
         signal_only = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mes
         allowed_mhi = s.paper_market_allowlist.get(strategy_id, ())
         paper_market = s.mode == "IB_PAPER" and intent.legs[0].instrument_id in allowed_mhi
-        all_weather = future and intent.legs[0].underlying in ALL_WEATHER_FUTURES
-        if all_weather and not paper_market:
+        restricted_future = future and intent.legs[0].underlying in RESTRICTED_FUTURES
+        if restricted_future and not paper_market:
             return reject("FUTURE_NOT_AUTHORIZED")
-        if intent.order_type == "STOP" and not (all_weather and paper_market):
+        if intent.order_type == "STOP" and not (restricted_future and paper_market):
             return reject("STOP_NOT_AUTHORIZED")
         if signal_only and intent.order_type != "MARKET":
             return reject("SIGNAL_ONLY_MARKET_REQUIRED")

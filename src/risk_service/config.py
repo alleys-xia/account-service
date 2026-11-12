@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from oms_protocol.common import Token, digest
-from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURES, UnderlyingType
+from oms_protocol.futures import FUTURES, RESTRICTED_FUTURES, UnderlyingType
 from oms_protocol.orders import Amount, FrozenModel
 from pydantic import AwareDatetime, Field, SecretStr, model_validator
 
@@ -65,7 +65,7 @@ class Instrument(FrozenModel):
                 or self.underlying_type != product.underlying_type
                 or self.settlement != product.settlement
                 or (self.price_increment is not None and self.price_increment != product.tick)
-                or (self.underlying in ALL_WEATHER_FUTURES and self.price_increment is None)
+                or (self.underlying in RESTRICTED_FUTURES and self.price_increment is None)
             ):
                 raise ValueError("invalid supported futures catalog entry")
             if self.entry_cutoff_at is not None and self.entry_cutoff_at.date() >= self.expiry:
@@ -142,7 +142,7 @@ class Settings(FrozenModel):
                 if (
                     ref is None
                     or ref.asset_type != "FUTURE"
-                    or ref.underlying not in ALL_WEATHER_FUTURES | {"MHI"}
+                    or ref.underlying not in RESTRICTED_FUTURES | {"MHI"}
                 ):
                     raise ValueError(
                         "paper market admission requires a supported explicit futures contract"

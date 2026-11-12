@@ -1,4 +1,4 @@
-# All-weather futures account and execution contract
+# Futures account and execution contract
 
 Protocol release: `oms-protocol==0.8.0`, `oms-client==0.8.0`,
 `portfolio-client==0.7.0`. Account service is `0.7.0`; execution service is
@@ -33,9 +33,9 @@ expiry, raw multiplier, tick and price magnifier against fresh IB contractDetail
 
 ## Operator configuration
 
-Use the actual strategy instance `all_weather_trend` in all allowlists and
-strategy limits. The product plugin identifier can separately be
-`all-weather-trend`. These are different identifiers.
+Use the configured strategy instance ID in all allowlists and strategy limits.
+The examples below use `example_futures` as a placeholder; replace it with the
+actual instance ID before deployment.
 
 Risk requires `mode="IB_PAPER"`, `require_portfolio=true`, and an explicit
 `paper_market_allowlist` for the instrument IDs. New roots are denied for
@@ -48,9 +48,9 @@ fixed reservations, not validated broker margins):
 
 ```toml
 [paper_market_allowlist]
-all_weather_trend = ["NES2612", "MTN2612", "1OZ2702", "MZC2703", "M6E2612"]
+example_futures = ["NES2612", "MTN2612", "1OZ2702", "MZC2703", "M6E2612"]
 
-[strategies.all_weather_trend]
+[strategies.example_futures]
 halted = true
 max_order_cost = "20000"
 max_committed = "40000"

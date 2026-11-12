@@ -4,7 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from oms_protocol.common import digest, uid, utcnow
-from oms_protocol.futures import ALL_WEATHER_FUTURES, FUTURE_POSITION_CAPS
+from oms_protocol.futures import FUTURE_POSITION_CAPS, RESTRICTED_FUTURES
 from oms_protocol.messages import ProtocolError, RiskDecision
 from oms_protocol.orders import OrderIntent, replacement_error
 from psycopg.types.json import Jsonb
@@ -231,7 +231,7 @@ class Service:
                     and not closing
                     and (
                         request.intent.order_type == "MARKET"
-                        or request.intent.legs[0].underlying in ALL_WEATHER_FUTURES
+                        or request.intent.legs[0].underlying in RESTRICTED_FUTURES
                     )
                     and (signal_only or paper_market)
                 ):

@@ -99,7 +99,7 @@ class StockMarketTests(TestCase):
         self.assertTrue(result.approved)
         self.assertEqual(result.cost, 0)
 
-    def test_stock_market_requires_fresh_covered_long_day_order(self):
+    def test_stock_market_requires_fresh_covered_day_order(self):
         for invalid in (
             {"market_reference_price": None},
             {"market_budget_amount": "999.99"},
@@ -107,11 +107,55 @@ class StockMarketTests(TestCase):
             {"time_in_force": "GTC"},
             {"market_reference_at": NOW - timedelta(seconds=10)},
             {"legs": [STOCK | {"metadata_status": "PROVISIONAL"}]},
-            {"legs": [STOCK | {"side": "SELL"}], "net_price_effect": "CREDIT"},
-            {"legs": [STOCK | {"position_effect": "CLOSE"}], "close_position_id": "short-lot"},
         ):
             with self.subTest(invalid=invalid), self.assertRaises(ValidationError):
                 intent(**invalid)
+
+    def test_short_market_requires_allowlist_and_double_notional_reserve(self):
+        order = intent(legs=[STOCK | {"side": "SELL"}], net_price_effect="CREDIT")
+        self.assertEqual(self.assess(order).reason, "STOCK_SHORT_NOT_AUTHORIZED")
+        self.settings.instruments["XYZ"] = self.settings.instruments["XYZ"].model_copy(
+            update={"stock_short_budget_per_share": Decimal("220")}
+        )
+        self.settings.stock_short_allowlist.update({"alpha": ("XYZ",)})
+        result = self.assess(order)
+        self.assertTrue(result.approved)
+        self.assertEqual(result.cost, Decimal("2030"))
+        self.assertEqual(order.stock_short_unit_budget, Decimal("202"))
+        self.settings.instruments["XYZ"] = self.settings.instruments["XYZ"].model_copy(
+            update={"stock_short_budget_per_share": Decimal("201")}
+        )
+        self.assertEqual(self.assess(order).reason, "STOCK_SHORT_BUDGET_EXCEEDED")
+
+    def test_short_market_cover_is_owned_reduce_only_even_after_revocation(self):
+        opening = intent(legs=[STOCK | {"side": "SELL"}], net_price_effect="CREDIT")
+        close = OrderIntent.close_position(
+            "short-lot",
+            opening,
+            quantity="10",
+            order_type="MARKET",
+            market_reference_price="99",
+            market_reference_at=NOW,
+            market_budget_amount="990",
+            rth_only=True,
+            decision_time=NOW,
+            deadline_at=NOW + timedelta(seconds=2),
+        )
+        lot = build_lots(
+            [
+                dict(
+                    order_id="short-lot",
+                    strategy_instance_id="alpha",
+                    consistency="CONSISTENT",
+                    intent=opening.model_dump(mode="json"),
+                    filled={"XYZ": "10"},
+                )
+            ]
+        )["short-lot"]
+        validate_close(close, "alpha", lot)
+        self.assertEqual(close.legs[0].side, "BUY")
+        self.assertTrue(self.assess(close, reduce_only=True).approved)
+        self.assertEqual(self.assess(close, reduce_only=True).cost, 0)
 
     def test_legacy_mes_wire_and_market_authorization(self):
         raw = {

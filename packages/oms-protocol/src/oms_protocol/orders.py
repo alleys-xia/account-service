@@ -113,7 +113,10 @@ class OrderIntent(FrozenModel):
         if self.stop_amount is None:
             value.pop("stop_amount", None)
         for field in (
-            "market_reference_price", "market_reference_at", "market_budget_amount", "rth_only",
+            "market_reference_price",
+            "market_reference_at",
+            "market_budget_amount",
+            "rth_only",
         ):
             if getattr(self, field) is None:
                 value.pop(field, None)
@@ -142,7 +145,9 @@ class OrderIntent(FrozenModel):
         if not self.is_stock_market and any(
             value is not None
             for value in (
-                self.market_reference_price, self.market_reference_at, self.market_budget_amount,
+                self.market_reference_price,
+                self.market_reference_at,
+                self.market_budget_amount,
             )
         ):
             raise ValueError("market reference and budget apply only to stock MARKET orders")
@@ -152,11 +157,10 @@ class OrderIntent(FrozenModel):
             if self.is_stock_market:
                 if (
                     leg.metadata_status != "VERIFIED"
-                    or leg.side != ("SELL" if closing else "BUY")
                     or self.rth_only is not True
                     or self.time_in_force != "DAY"
                 ):
-                    raise ValueError("stock MARKET requires a verified RTH DAY long open or close")
+                    raise ValueError("stock MARKET requires a verified RTH DAY open or close")
                 if (
                     self.market_reference_price is None
                     or self.market_budget_amount is None
@@ -237,6 +241,16 @@ class OrderIntent(FrozenModel):
             and self.legs[0].asset_type == "STOCK"
             and self.legs[0].side == "SELL"
         )
+
+    @property
+    def stock_short_unit_budget(self):
+        """Double notional per share; market opens use the buffered decision budget."""
+        if not self.is_stock_short_open:
+            return None
+        price = (
+            self.market_budget_amount / self.quantity if self.is_stock_market else self.limit_amount
+        )
+        return STOCK_SHORT_BUDGET_FACTOR * price
 
     @classmethod
     def close_position(cls, position_id: str, opening: "OrderIntent", **kwargs):

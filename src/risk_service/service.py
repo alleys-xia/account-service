@@ -324,7 +324,9 @@ class Service:
                         order["reservations"][request.message_id][
                             "stock_short_budget_per_share"
                         ] = str(
-                            self.settings.instruments[
+                            request.intent.stock_short_unit_budget
+                            if request.intent.is_stock_market
+                            else self.settings.instruments[
                                 request.intent.legs[0].instrument_id
                             ].stock_short_budget_per_share
                         )

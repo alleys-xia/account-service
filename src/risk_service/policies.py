@@ -196,6 +196,11 @@ class Engine:
             fee_buffer = ZERO
         elif stock_market:
             base = intent.market_budget_amount
+            if stock_short:
+                cap = s.instruments[intent.legs[0].instrument_id].stock_short_budget_per_share
+                if cap is None or intent.stock_short_unit_budget > cap:
+                    return reject("STOCK_SHORT_BUDGET_EXCEEDED")
+                base *= STOCK_SHORT_BUDGET_FACTOR
             expiry_loss = None
         elif intent.structure == "SINGLE":
             if intent.net_price_effect != (
@@ -281,10 +286,10 @@ class Engine:
                 if signal_only
                 else "FUTURES_CONTRACT_BUDGET"
                 if future
-                else "STOCK_MARKET_NOTIONAL_BUDGET"
-                if stock_market
                 else "STOCK_SHORT_NOTIONAL_BUDGET"
                 if stock_short
+                else "STOCK_MARKET_NOTIONAL_BUDGET"
+                if stock_market
                 else "EXPIRY_MAX_LOSS"
             ),
         )
